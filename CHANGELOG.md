@@ -61,8 +61,9 @@ the default surface is ≈ 61,900 tokens, the bundled `spds` profile is
   Every value is transcribed from the owner's verified `autocad-spds` library
   (`engineering/spds/standards.py` names the standard per block); a format or
   size outside it is refused by name. The `spds` preset lists the pack. The
-  COM paths go through the same backend contract as every other tool and have
-  not yet been run live.
+  COM paths go through the same backend contract as every other tool and were
+  executed live once by `scripts/smoke_v17_com.py` (on the seat of this
+  machine, which reports AutoCAD 2024 / 24.3 рус.; see **Live run** below).
 - **`linetype_define(name, pattern, description)`**: a new contract on both
   engines for a linetype built from a dash pattern (ezdxf adds it directly; COM
   loads a temporary `.lin`). It is idempotent.
@@ -115,8 +116,8 @@ the default surface is ≈ 61,900 tokens, the bundled `spds` profile is
   renders the in-memory document. Live, it renders a `Document.Export`
   snapshot, the route `drawing_understand` already measured on AutoCAD 2026.
   On the live engine, a screenshot with a window, layers, a layout or handle
-  labels goes through it, so the AutoCAD view never moves. Not yet executed
-  live.
+  labels goes through it, so the AutoCAD view never moves. Executed live once
+  by `scripts/smoke_v17_com.py` (AutoCAD 2024 / 24.3, see **Live run**).
 - Russian search vocabulary for about 80 drafting tools.
 - `benchmarks/token_suite.py` idle lane: rows for the short listing and the
   three presets.
@@ -187,6 +188,68 @@ cost a client extra calls:
   word is folded to a crude stem (up to two final vowels / `й` / `ь` off, then
   five letters), so `отметка` / `отметку` match. English queries rank exactly
   as before.
+
+### Live run
+
+Everything above was executed live once by `scripts/smoke_v17_com.py`, and
+the five v1.6 smoke scripts were re-run against the same seat to check that
+nothing regressed. The seat on this machine identifies itself as **AutoCAD 2024
+(24.3, Russian)**, not 2026. The first run passed most steps but exposed the
+problems below, each found live, fixed, given a test and re-run until every
+line passed:
+
+- **Calls refused while AutoCAD is busy.** AutoCAD refuses an incoming call
+  ("Call was rejected by callee") while it switches layouts, finishes a
+  `SendCommand` or regenerates. `spds_sheet` failed about one run in two, on
+  `AddLine`, `ObjectName` or `Documents.Count`. The COM thread now registers an
+  `IMessageFilter` (`backends/com_message_filter.py`, through `ctypes`, because
+  pywin32 has no `CoRegisterMessageFilter`), so COM retries a refused call for up
+  to 20 s. A refused call never ran, so the retry is safe for writes too. After
+  the fix, five runs out of five passed.
+- **A refused name lookup was invisible.** pywin32 turns a refused
+  `GetIDsOfNames` into `AttributeError("<unknown>.Count")` and drops the
+  HRESULT. `drawing_close` therefore reported an error for a document it had
+  closed. The retry helper now counts that disguise as a refusal. `_acad_doc()`
+  waits out a busy seat, and `system_run_lisp` waits until the command line
+  settles after the value comes back. `_safe_send_command` no longer reads a
+  refused `CMDACTIVE` as idle.
+- **AutoCAD's own viewport still appeared on a new layout.** The v1.7
+  suppression wrote `LAYOUTCREATEVIEWPORT` as a Python int (`VT_I4`). AutoCAD
+  refused that ("error setting the system variable"), and the failure was
+  logged at debug level. Integer variables are now written as `VT_I2` when the
+  plain int is refused (`_set_int_sysvar`). This also covers
+  `system_set_variable`, `BACKGROUNDPLOT`, `AUDITCTL` and the
+  `_safe_send_command` variables. The operator's value is restored with a retry,
+  and a failed restore is now a warning.
+- **`viewport_create(remove_others=True)` deleted the sheet's own viewport.**
+  The guard read `Number`, which an AcadPViewport does not have. The kept
+  viewport went to status -1, and the sheet rendered empty. The sheet's
+  viewport is now identified as the first viewport of the layout block.
+- **Live sheet screenshots showed nothing through a viewport.** AutoCAD exports
+  the viewports of a layout that is not on screen with status -1, and ezdxf
+  draws only status > 0. The snapshot (and only the snapshot) now turns them on
+  (`render.wake_offscreen_viewports`).
+- **The soil hatches came out 25.4 times too dense.** A drawing from
+  `acad.dwt` has `MEASUREMENT` 0, so both engines take ANSI31 / DOTS / … from
+  `acad.pat`. `spds_setup` now sets `MEASUREMENT` 1, and `spds_soil_hatch`
+  scales against the pattern file actually in use and reports it as
+  `pattern_file`.
+- **The PDF of the A3 sheet was A4 and clipped.** The layout kept AutoCAD's
+  default page setup, and the plain ISO A3 media of "DWG To PDF" keeps
+  17/17/5/5 mm unprintable. `spds_sheet(layout=...)` now applies its own format
+  on the borderless media (`ISO_full_bleed_A3_(420.00_x_297.00_MM)`) at 1:1 and
+  reports it as `page_setup`. The new `page_setup_apply(full_bleed=True)` does
+  the same for any sheet. `viewport_create(layer="Defpoints")` keeps the
+  viewport frame off the print.
+- **A PDF held open elsewhere** made `PlotToFile` return a bare False, which
+  read as a plot-area problem. The live export now says the file is locked.
+- `layout_set_current` reported any failure, a refused call included, as
+  "Layout not found".
+- `scripts/smoke_v17_com.py` passed its viewport check unconditionally. It now
+  fails when AutoCAD's own viewport is present, and it checks that the
+  operator's `LAYOUTCREATEVIEWPORT` comes back unchanged.
+  `scripts/smoke_settings_com.py` assumed an English seat (`Layout1`); it now
+  takes the first paper layout (`Лист1` here).
 
 ## [1.6.0] — 2026-09-25
 
