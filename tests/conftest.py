@@ -25,6 +25,25 @@ def pin_headless_backend(request, monkeypatch):
     monkeypatch.setenv("AUTOCAD_MCP_BACKEND", "ezdxf")
 
 
+@pytest.fixture(autouse=True)
+def reset_discovery_mode():
+    """Leave the server's catalog unswapped for the next test.
+
+    ``_apply_discovery_mode("search")`` installs a server-level transform that
+    no lifespan undoes, so a test that turned it on and did not turn it off
+    left the next test in the same xdist worker listing only
+    ``search_tools`` / ``call_tool`` (``test_cad_tool_meta_reaches_the_wire``
+    failed with a KeyError, depending on the order). Only when ``server`` is
+    already imported: this fixture must not import it for every test.
+    """
+    yield
+    import sys
+
+    server = sys.modules.get("server")
+    if server is not None:
+        server._apply_discovery_mode("off")
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",

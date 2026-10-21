@@ -3,7 +3,7 @@
   "schema_version": 1,
   "package_version": "1.7.0",
   "totals": {
-    "tools": 260,
+    "tools": 261,
     "resources": 8,
     "prompts": 5,
     "groups": 29
@@ -30,7 +30,7 @@
     "premium": 12,
     "sheet": 11,
     "solids": 5,
-    "spds": 9,
+    "spds": 10,
     "styles": 10,
     "system": 8,
     "templates": 2,
@@ -2985,6 +2985,21 @@
       ],
       "annotations": {
         "title": "СПДС: Sheet with Title Block",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_sheet_update",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "Change graphs of an existing СПДС stamp in place (sheet no., title, stage...).",
+      "tags": [
+        "modify",
+        "sheet",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Update Stamp",
         "readOnlyHint": false
       }
     },

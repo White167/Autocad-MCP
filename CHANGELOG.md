@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`spds_sheet_update(stamp, layout=, sheet_id=)`**: changes graphs of a
+  stamp drawn by `spds_sheet` in place. It replaces only those graphs' texts,
+  re-fitted by the same rule, and clears a graph given `""`. The sheet is not
+  redrawn.
+- **`ACADMCP_SPDS` records** (`engineering/spds/records.py`). `spds_sheet`
+  writes a `sheet` record on its first line and a `field` record on each graph
+  text. Every mark tool writes a `mark` record on its text with the scale and
+  paper height; axis marks add label and position, levels add value and format.
+  `read_index(doc)` reads them from one snapshot (`snapshot.read_document`).
+  They are the base for the `spds_*` critique focuses.
+- `system_about(detail=)`: under compact responses (the `spds` preset) it
+  answers with a summary by default: counts per group and only the
+  unsupported capabilities. 14 082 → 2 830 characters.
+
+### Fixed
+
+- `drawing_digest` on a sheet flagged the sheet's own viewport (DXF id 1) as
+  `outside_frame` / `layer_0`. The snapshot reader now skips it.
+- `cad_batch` cut any step result that carries a `handle` down to
+  `{handle}`, losing `spds_soil_hatch`'s `pattern` / `pattern_file` /
+  `letter`. Only real entity records shrink now.
+- Order-dependent tests: the token suite's idle lane pins the default surface
+  instead of inheriting it, and `conftest.py` turns search mode off after
+  every test (`test_cad_tool_meta_reaches_the_wire` failed with a KeyError in
+  about one run in four under `-n 8`).
+- `scripts/smoke_v17_com.py` passes every step on AutoCAD 2026 (25.1) too.
+
 ## [1.7.0] — 2026-10-21
 
 The first stage of the token-economy roadmap

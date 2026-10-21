@@ -136,9 +136,18 @@ def _xy(p: Pt, scale: float, origin: Pt) -> list[float]:
 
 
 async def draw_prims(
-    backend, prims: Sequence[Prim], *, origin: Pt = (0.0, 0.0), scale: float = 1.0
+    backend,
+    prims: Sequence[Prim],
+    *,
+    origin: Pt = (0.0, 0.0),
+    scale: float = 1.0,
+    record=None,
 ) -> list[str]:
-    """Draw ``prims`` (mm of paper) at ``origin``, enlarged by ``scale``; return handles."""
+    """Draw ``prims`` (mm of paper) at ``origin``, enlarged by ``scale``; return handles.
+
+    ``record(prim)`` may return an ``ACADMCP_SPDS`` payload for a primitive;
+    it is written onto that primitive's entity (``engineering/spds/records.py``).
+    """
     await ensure_resources(
         backend, _layers_of(prims), text_style=any(isinstance(p, Txt) for p in prims)
     )
@@ -179,4 +188,9 @@ async def draw_prims(
         else:  # pragma: no cover - the modules only emit the five above
             raise ValueError(f"unknown СПДС primitive {type(prim).__name__}")
         handles.append(entity.handle)
+        payload = record(prim) if record is not None else None
+        if payload:
+            from engineering.spds.records import write
+
+            await write(backend, entity.handle, payload)
     return handles

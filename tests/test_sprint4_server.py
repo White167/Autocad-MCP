@@ -64,7 +64,7 @@ async def test_registered_tools_returns_objects_with_name_and_tags():
 async def test_system_about_includes_engineering_group(backend):
     import server
 
-    about = await server.system_about(ctx=_Ctx(backend))
+    about = await server.system_about(detail=True, ctx=_Ctx(backend))
     groups = about["tool_groups"]
 
     # An engineering tool must appear somewhere in the breakdown (the old
@@ -79,7 +79,7 @@ async def test_system_about_includes_engineering_group(backend):
 async def test_system_about_includes_premium_group(backend):
     import server
 
-    about = await server.system_about(ctx=_Ctx(backend))
+    about = await server.system_about(detail=True, ctx=_Ctx(backend))
     groups = about["tool_groups"]
     all_listed = {name for names in groups.values() for name in names}
     # Premium meta-tools (e.g. drawing_plan) used to be missing from the dict.
@@ -90,7 +90,7 @@ async def test_system_about_includes_premium_group(backend):
 async def test_entity_delete_many_not_under_entity_creation(backend):
     import server
 
-    about = await server.system_about(ctx=_Ctx(backend))
+    about = await server.system_about(detail=True, ctx=_Ctx(backend))
     groups = about["tool_groups"]
     # The bug: entity_delete_many was hardcoded under entity_creation.
     assert "entity_delete_many" not in groups.get("entity_creation", [])
@@ -101,7 +101,7 @@ async def test_entity_delete_many_not_under_entity_creation(backend):
 async def test_system_about_total_tools_matches_count(backend):
     import server
 
-    about = await server.system_about(ctx=_Ctx(backend))
+    about = await server.system_about(detail=True, ctx=_Ctx(backend))
     count = await server._registered_tool_count()
     # total_tools is reported dynamically (never hardcoded) and agrees with
     # the count helper.
@@ -116,7 +116,7 @@ async def test_system_about_total_tools_matches_count(backend):
 async def test_drawing_close_appears_in_groups(backend):
     import server
 
-    about = await server.system_about(ctx=_Ctx(backend))
+    about = await server.system_about(detail=True, ctx=_Ctx(backend))
     all_listed = {name for names in about["tool_groups"].values() for name in names}
     # drawing_close was omitted by the old static dict.
     assert "drawing_close" in all_listed

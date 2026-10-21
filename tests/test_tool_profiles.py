@@ -82,7 +82,7 @@ async def test_removed_core_profile_is_reported_by_system_about():
     """A log line on a STDIO server is easy to miss; system_about must show it."""
     await server._apply_tool_profile("core")
     ctx = _AboutCtx()
-    about = await server.system_about(ctx=ctx)
+    about = await server.system_about(detail=True, ctx=ctx)
     assert about["tool_profile"]["profile"] == "full"
     assert about["tool_profile"]["requested"] == "core"
 

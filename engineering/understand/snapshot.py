@@ -277,6 +277,11 @@ def records_from_doc(doc, *, source: str) -> Snapshot:
     layouts = tuple(doc.layouts.names_in_taborder())
     for name in layouts:
         for entity in doc.layouts.get(name):
+            # A paper layout's own viewport (id 1) is the sheet window AutoCAD
+            # keeps, not drawn content: drawing_digest flagged it on every
+            # live sheet as outside_frame / layer_0 (AutoCAD 2024, 24.3).
+            if entity.dxftype() == "VIEWPORT" and entity.dxf.get("id") == 1:
+                continue
             record = _record(entity, name)
             if record is not None:
                 records.append(record)
@@ -428,6 +433,26 @@ async def take_snapshot(backend, path: str | None = None) -> Snapshot:
             shutil.rmtree(folder, ignore_errors=True)
     source = backend._doc_path or "memory:untitled"
     return await backend._async(lambda: records_from_doc(backend._doc, source=source))
+
+
+async def read_document(backend, reader):
+    """``reader(doc)`` over an ``ezdxf`` document of the current drawing, read-only.
+
+    For readers that need what :class:`EntityRecord` leaves out (XDATA, the
+    layout an entity sits on): the live engine hands ``reader`` the same
+    ``Document.Export`` snapshot :func:`take_snapshot` reads - every space, one
+    export - and the headless engine its in-memory document under its own lock.
+    ``reader`` must not modify the document it is given.
+    """
+    import ezdxf
+
+    if backend.name == "com":
+        written, folder, _source = await backend._run(_com_export, backend, None)
+        try:
+            return await asyncio.to_thread(lambda: reader(ezdxf.readfile(written)))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+    return await backend._async(lambda: reader(backend._require_doc()))
 
 
 def length_of(rec: EntityRecord) -> float:

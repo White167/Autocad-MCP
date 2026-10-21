@@ -493,7 +493,14 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
     previous_config = config.settings.tool_config
     rows: list[dict[str, Any]] = []
     try:
+        # The default surface, pinned rather than inherited: a test that ran
+        # earlier in the same process (an xdist worker) and left packs, the
+        # short listing or a tool config set made "default" something else,
+        # and the pack arithmetic below failed about one run in four.
         config.settings.tool_profile = "full"
+        config.settings.tool_packs = "all"
+        config.settings.tool_descriptions = "full"
+        config.settings.tool_config = ""
         srv._apply_discovery_mode("off")
         rows.append(
             await _idle_row(
@@ -533,7 +540,7 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
                 turns,
             )
         )
-        config.settings.tool_packs = previous_packs
+        config.settings.tool_packs = "all"
         config.settings.tool_descriptions = "short"
         rows.append(
             await _idle_row(
@@ -554,7 +561,7 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
             )
         )
         config.settings.tool_profile = "full"
-        config.settings.tool_descriptions = previous_descriptions
+        config.settings.tool_descriptions = "full"
         for preset in ("spds", "drafting", "review"):
             config.settings.tool_config = preset
             rows.append(
@@ -565,7 +572,7 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
                     turns,
                 )
             )
-        config.settings.tool_config = previous_config
+        config.settings.tool_config = ""
         srv._apply_discovery_mode("search")
         rows.append(
             await _idle_row(

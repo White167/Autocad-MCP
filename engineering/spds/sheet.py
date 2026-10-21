@@ -27,7 +27,7 @@ from engineering.spds.standards import (
     sheet_size,
 )
 
-__all__ = ["MIN_WIDTH_FACTOR", "normalise_fields", "sheet_prims"]
+__all__ = ["MIN_WIDTH_FACTOR", "field_prims", "normalise_fields", "sheet_prims", "stamp_origin"]
 
 MIN_WIDTH_FACTOR = 0.8
 THICK = "СПДС_Рамка"
@@ -84,6 +84,31 @@ def _fit(text: str, cx: float, cy: float, height: float, max_width: float, wrap:
         _fit_line(parts[0], (cx, cy + 3.0), height, max_width, "MC", fitted, key),
         _fit_line(parts[1], (cx, cy - 3.0), height, max_width, "MC", fitted, key),
     ]
+
+
+def stamp_origin(fmt: str, orientation: str | None = None) -> tuple[float, float]:
+    """Lower-left corner of the основная надпись on the sheet, mm of paper."""
+    width, _height, _key, _orient = sheet_size(fmt, orientation)
+    return (width - FORM3["offset_from_sheet_right"], FRAME_MARGINS["bottom"])
+
+
+def field_prims(
+    fmt: str, orientation: str | None, graphs: Mapping[int, str], fitted: list | None = None
+) -> list[tuple[int, int, Txt]]:
+    """The fitted texts of ``graphs`` as ``(graph, line, Txt)``, mm of paper.
+
+    One place for the fitting rule, so ``spds_sheet_update`` re-fits a graph
+    exactly as ``spds_sheet`` drew it. ``line`` is 0, or 1 for the second line
+    of a wrapped graph.
+    """
+    ox, oy = stamp_origin(fmt, orientation)
+    fitted = [] if fitted is None else fitted
+    out: list[tuple[int, int, Txt]] = []
+    for graph, text in sorted(graphs.items()):
+        cx, cy, h, max_w, wrap = FORM3["fields"][graph]
+        lines = _fit(text, ox + cx, oy + cy, h, max_w, wrap, fitted, graph)
+        out.extend((graph, i, prim) for i, prim in enumerate(lines))
+    return out
 
 
 def sheet_prims(
@@ -151,9 +176,8 @@ def sheet_prims(
                     f"signature {i + 1}",
                 )
             )
-    for graph, text in sorted(graphs.items()):
-        cx, cy, h, max_w, wrap = FORM3["fields"][graph]
-        prims.extend(_fit(text, *at(cx, cy), h, max_w, wrap, fitted, graph))
+    fields = field_prims(fmt, orientation, graphs, fitted)
+    prims.extend(prim for _graph, _line, prim in fields)
 
     label = f"Формат {key.replace('A', 'А')}"
     prims.append(
@@ -188,4 +212,6 @@ def sheet_prims(
         "frame": (fl, fb, fr, ft),
         "stamp_origin": (ox, oy),
         "fitted": fitted,
+        "fields": fields,
+        "graphs": graphs,
     }

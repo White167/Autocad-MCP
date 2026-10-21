@@ -1090,6 +1090,7 @@ PACK_TOOL_NAMES: dict[str, frozenset[str]] = {
             "spds_section_mark",
             "spds_slope",
             "spds_soil_hatch",
+            "spds_sheet_update",
         }
     ),
     "pid": frozenset(
@@ -4636,18 +4637,19 @@ async def _batch_fingerprint(backend) -> dict | None:
 def _compact_batch_result(result: Any, verbose: bool) -> Any:
     """Trim a step result to what is not recoverable from the drawing.
 
-    A dict carrying a ``handle`` is an EntityInfo (or an insert/copy that
-    returns one): every other field of it is one ``entity_get`` away, and
-    re-emitting all of them per step gives back exactly the tokens batching
-    just saved. Anything without a handle — a score, a report, a measured
-    value, a point — is kept whole, because nothing else can produce it.
+    An EntityInfo (or an insert/copy that returns one) shrinks to its handle:
+    every other field of it is one ``entity_get`` away, and re-emitting all of
+    them per step gives back exactly the tokens batching just saved. Anything
+    else - a score, a report, a measured value, a point - is kept whole,
+    because nothing else can produce it, even when it names a handle:
+    ``spds_soil_hatch``'s ``pattern`` / ``pattern_file`` / ``letter`` were cut
+    to ``{handle}`` inside a batch (v1.7 live run).
     """
-    if verbose or not isinstance(result, dict):
+    from discovery.responses import is_entity_record
+
+    if verbose or not isinstance(result, dict) or not is_entity_record(result):
         return result
-    handle = result.get("handle", _MISSING)
-    if handle is _MISSING:
-        return result
-    return {"handle": handle}
+    return {"handle": result["handle"]}
 
 
 _BATCH_CHECK_NOTE = (
@@ -5992,8 +5994,24 @@ async def tool_help(
     annotations={"title": "Backend Info", "readOnlyHint": True},
     tags={"system"},
 )
-async def system_about(ctx: Context = None) -> dict:
-    """Get detailed information about AutoCAD MCP Pro capabilities and available tools."""
+async def system_about(
+    detail: Annotated[
+        bool | None,
+        Field(
+            default=None,
+            description="Every tool name and capability; default: on unless responses are compact.",
+        ),
+    ] = None,
+    ctx: Context = None,
+) -> dict:
+    """Get detailed information about AutoCAD MCP Pro capabilities and available tools.
+
+    Under compact responses (the `spds` preset) the answer is a summary unless
+    `detail=True`: tool counts per group instead of every name, only the
+    capabilities that are *not* supported (with their reasons), and the tool
+    profile with its name lists replaced by counts. The full answer measured
+    about 8 000 tokens on AutoCAD 2024 with the `spds` preset.
+    """
     b = ctx.lifespan_context.get("backend")
     backend_name = b.name if b else "none"
     # R15: derive the per-group breakdown dynamically from each tool's tags so
@@ -6026,7 +6044,36 @@ async def system_about(ctx: Context = None) -> dict:
     # R20: omit total_tools when unknown rather than reporting a fake -1.
     if tool_count is not None:
         out["total_tools"] = tool_count
-    return out
+    if detail is None:
+        detail = (_active_tool_profile or {}).get("responses") != "compact"
+    return out if detail else _about_summary(out)
+
+
+def _about_summary(out: dict) -> dict:
+    """``system_about`` without the long name lists (see its docstring)."""
+
+    def _lists_to_counts(value):
+        if isinstance(value, dict):
+            return {
+                (f"{k}_count" if isinstance(v, list) and len(v) > 8 else k): (
+                    len(v) if isinstance(v, list) and len(v) > 8 else _lists_to_counts(v)
+                )
+                for k, v in value.items()
+            }
+        return value
+
+    summary = dict(out)
+    summary["tool_groups"] = {name: len(tools) for name, tools in out["tool_groups"].items()}
+    summary["capabilities"] = {
+        "unsupported": {
+            key: cap.get("reason")
+            for key, cap in (out.get("capabilities") or {}).items()
+            if not cap.get("supported")
+        }
+    }
+    summary["tool_profile"] = _lists_to_counts(out["tool_profile"])
+    summary["detail"] = "summary; system_about(detail=true) lists every name"
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -12142,7 +12189,7 @@ async def cable_takeoff(
 
 
 # ---------------------------------------------------------------------------
-# ── SECTION 28: СПДС sheets and marks (9 tools) ─────────────────────────────
+# ── SECTION 28: СПДС sheets and marks (10 tools) ─────────────────────────────
 # ---------------------------------------------------------------------------
 #
 # engineering/spds/: ГОСТ Р 21.101-2020 sheets and marks for construction
@@ -12151,10 +12198,37 @@ async def cable_takeoff(
 # a format or size outside them is refused by name.
 
 
-async def _spds_draw(ctx: Context, prims, *, scale: float, origin=(0.0, 0.0)) -> list[str]:
+async def _spds_draw(
+    ctx: Context, prims, *, scale: float, origin=(0.0, 0.0), record=None
+) -> list[str]:
     from engineering.spds.draw import draw_prims
 
-    return await draw_prims(_backend(ctx), prims, origin=tuple(origin), scale=float(scale))
+    return await draw_prims(
+        _backend(ctx), prims, origin=tuple(origin), scale=float(scale), record=record
+    )
+
+
+def _spds_new_id() -> str:
+    from engineering.spds.records import new_id
+
+    return new_id()
+
+
+def _spds_mark_record(mark: str, scale: float, extra=None):
+    """``record`` for ``_spds_draw``: an ACADMCP_SPDS ``mark`` payload on each text.
+
+    ``extra(prim)`` adds the per-text fields (an axis's label and position).
+    """
+    from engineering.spds.draw import Txt
+
+    def record(prim):
+        if not isinstance(prim, Txt):
+            return None
+        payload = {"kind": "mark", "mark": mark, "scale": float(scale), "h": float(prim.height)}
+        payload.update(extra(prim) if extra is not None else {})
+        return payload
+
+    return record
 
 
 _SPDS_SCALE_DOC = (
@@ -12303,8 +12377,40 @@ async def spds_sheet(
     except RuntimeError as exc:
         raise ToolError(str(exc)) from exc
     o = tuple(origin) if origin else (0.0, 0.0)
+    fl, fb, fr, ft = sheet["frame"]
+    k = float(scale)
+    sheet_id = _spds_new_id()
+    frame_box = [o[0] + fl * k, o[1] + fb * k, o[0] + fr * k, o[1] + ft * k]
+    stamp_at = [o[0] + sheet["stamp_origin"][0] * k, o[1] + sheet["stamp_origin"][1] * k]
+    # ACADMCP_SPDS: the sheet record on its first line, a field record on each
+    # graph's text - what spds_sheet_update and the spds_* focuses read.
+    payloads = {
+        id(sheet["prims"][0]): {
+            "kind": "sheet",
+            "id": sheet_id,
+            "form": 3,
+            "format": sheet["format"],
+            "orientation": sheet["orientation"],
+            "layout": layout or "Model",
+            "origin": list(o),
+            "scale": k,
+            "frame": frame_box,
+            "stamp_origin": stamp_at,
+            "graphs": {str(g): t for g, t in sheet["graphs"].items()},
+        }
+    }
+    for graph, line, prim in sheet["fields"]:
+        payloads[id(prim)] = {
+            "kind": "field",
+            "sheet": sheet_id,
+            "graph": graph,
+            "line": line,
+            "h": float(prim.height),
+        }
     try:
-        handles = await _spds_draw(ctx, sheet["prims"], scale=scale, origin=o)
+        handles = await _spds_draw(
+            ctx, sheet["prims"], scale=scale, origin=o, record=lambda p: payloads.get(id(p))
+        )
     finally:
         if layout is not None:
             await backend.layout_set_current(previous)
@@ -12332,8 +12438,6 @@ async def spds_sheet(
                 }
             except Exception as exc:  # the sheet stands; the plot setup is reported
                 plot = {"ok": False, "error": str(exc)[:300]}
-    fl, fb, fr, ft = sheet["frame"]
-    k = float(scale)
     return {
         "ok": True,
         "format": sheet["format"],
@@ -12341,13 +12445,125 @@ async def spds_sheet(
         "layout": layout or "Model",
         "entities": len(handles),
         "sheet_box": [o[0], o[1], o[0] + sheet["size"][0] * k, o[1] + sheet["size"][1] * k],
-        "frame": [o[0] + fl * k, o[1] + fb * k, o[0] + fr * k, o[1] + ft * k],
-        "stamp_origin": [
-            o[0] + sheet["stamp_origin"][0] * k,
-            o[1] + sheet["stamp_origin"][1] * k,
-        ],
+        "frame": frame_box,
+        "stamp_origin": stamp_at,
+        "sheet_id": sheet_id,
         "fitted": [f for f in sheet["fitted"] if f["width_factor"] < 1.0],
         **({"page_setup": plot} if plot is not None else {}),
+    }
+
+
+@cad_tool(
+    summary="Change graphs of an existing СПДС stamp in place (sheet no., title, stage...).",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Update Stamp", "readOnlyHint": False},
+    tags={"spds", "sheet", "modify"},
+)
+async def spds_sheet_update(
+    stamp: Annotated[
+        dict[str, str],
+        Field(
+            description="Graphs to change, by number or name (code, project, building, "
+            'sheet_title, stage, sheet, sheets, organisation); "" clears a graph.',
+        ),
+    ],
+    layout: Annotated[
+        str | None,
+        Field(default=None, description="Layout of the sheet; needed when several exist."),
+    ] = None,
+    sheet_id: Annotated[
+        str | None, Field(default=None, description="sheet_id from spds_sheet.")
+    ] = None,
+    ctx: Context = None,
+) -> dict:
+    """Rewrite graphs of a stamp drawn by `spds_sheet`, found by its ACADMCP_SPDS
+    record, without redrawing the sheet: only the named graphs' texts are
+    replaced, re-fitted by the same rule (width factor down to 0.8, then two
+    lines for graphs 2, 3, 4, 9), and the sheet record is updated. An empty
+    string clears a graph. Refused when no sheet is found, or several are and
+    neither `layout` nor `sheet_id` picks one.
+    """
+    from engineering.sheet.frames import enter_layout
+    from engineering.spds.records import read_index, write
+    from engineering.spds.sheet import field_prims, normalise_fields
+    from engineering.understand.snapshot import read_document
+
+    backend = _backend(ctx)
+    changes: dict[int, str] = {}
+    try:
+        for key, value in (stamp or {}).items():
+            graph = next(iter(normalise_fields({key: "x"})))
+            changes[graph] = str(value or "").strip()
+    except ValueError as exc:
+        raise ToolError(f"spds_sheet_update: {exc}") from exc
+    if not changes:
+        raise ToolError("spds_sheet_update: stamp names no graph to change")
+    index = await read_document(backend, read_index)
+    sheets = [
+        row
+        for row in index["sheets"]
+        if (layout is None or str(row.get("layout", "")).lower() == layout.strip().lower())
+        and (sheet_id is None or row.get("id") == sheet_id)
+    ]
+    if not sheets:
+        raise ToolError(
+            "spds_sheet_update: no СПДС sheet record"
+            + (f" on layout {layout!r}" if layout else "")
+            + "; draw the sheet with spds_sheet first"
+        )
+    if len(sheets) > 1:
+        found = ", ".join(f"{r['id']} ({r.get('layout')})" for r in sheets)
+        raise ToolError(f"spds_sheet_update: several sheets match ({found}); pass sheet_id")
+    sheet = sheets[0]
+    old = [
+        row["handle"]
+        for row in index["fields"]
+        if row.get("sheet") == sheet["id"] and int(row.get("graph", 0)) in changes
+    ]
+    graphs = {int(g): t for g, t in (sheet.get("graphs") or {}).items()}
+    graphs.update(changes)
+    new_texts = {g: t for g, t in changes.items() if t}
+    fitted: list = []
+    drawn = field_prims(sheet["format"], sheet["orientation"], new_texts, fitted)
+    payloads = {
+        id(prim): {
+            "kind": "field",
+            "sheet": sheet["id"],
+            "graph": g,
+            "line": line,
+            "h": prim.height,
+        }
+        for g, line, prim in drawn
+    }
+    target = None if sheet.get("layout") in (None, "Model") else sheet["layout"]
+    previous = await enter_layout(backend, target, caller="spds_sheet_update")
+    try:
+        for handle in old:
+            await backend.entity_delete(handle)
+        handles = await _spds_draw(
+            ctx,
+            [prim for _g, _line, prim in drawn],
+            scale=float(sheet.get("scale", 1.0)),
+            origin=tuple(sheet.get("origin") or (0.0, 0.0)),
+            record=lambda p: payloads.get(id(p)),
+        )
+        record = {k: v for k, v in sheet.items() if k not in ("handle", "layer", "v")}
+        record["graphs"] = {str(g): t for g, t in sorted(graphs.items()) if t}
+        await write(backend, sheet["handle"], record)
+    finally:
+        if target is not None:
+            await backend.layout_set_current(previous)
+    return {
+        "ok": True,
+        "sheet_id": sheet["id"],
+        "layout": sheet.get("layout"),
+        "updated": {str(g): t for g, t in new_texts.items()},
+        "cleared": sorted(g for g, t in changes.items() if not t),
+        "removed": len(old),
+        "entities": len(handles),
+        "fitted": [f for f in fitted if f["width_factor"] < 1.0],
     }
 
 
@@ -12388,7 +12604,11 @@ async def spds_axis(
         prims = axis_prims((x1, y1), (x2, y2), mark, ends=ends, diameter=diameter, scale=scale)
     except ValueError as exc:
         raise ToolError(f"spds_axis: {exc}") from exc
-    handles = await _spds_draw(ctx, prims, scale=scale)
+    vertical = abs(x2 - x1) < abs(y2 - y1)
+    position = {"label": mark, "dir": "x" if vertical else "y", "at": x1 if vertical else y1}
+    handles = await _spds_draw(
+        ctx, prims, scale=scale, record=_spds_mark_record("axis", scale, lambda _p: position)
+    )
     return {"ok": True, "mark": mark, "axis": handles[0], "entities": len(handles)}
 
 
@@ -12428,7 +12648,15 @@ async def spds_axis_grid(
         )
     except ValueError as exc:
         raise ToolError(f"spds_axis_grid: {exc}") from exc
-    handles = await _spds_draw(ctx, grid["prims"], scale=scale)
+
+    def _where(prim):
+        if prim.text in grid["vertical"]:
+            return {"label": prim.text, "dir": "x", "at": grid["vertical"][prim.text]}
+        return {"label": prim.text, "dir": "y", "at": grid["horizontal"].get(prim.text)}
+
+    handles = await _spds_draw(
+        ctx, grid["prims"], scale=scale, record=_spds_mark_record("axis", scale, _where)
+    )
     return {
         "ok": True,
         "vertical": grid["vertical"],
@@ -12487,7 +12715,10 @@ async def spds_elevation(
         prims = elevation_prims((x, y), label, kind=kind, direction=direction, scale=scale)
     except ValueError as exc:
         raise ToolError(f"spds_elevation: {exc}") from exc
-    handles = await _spds_draw(ctx, prims, scale=scale)
+    level = {"value": value, "decimals": decimals, "signed": signed, "type": kind}
+    handles = await _spds_draw(
+        ctx, prims, scale=scale, record=_spds_mark_record("elevation", scale, lambda _p: level)
+    )
     return {"ok": True, "text": label, "entities": len(handles), "handles": handles}
 
 
@@ -12542,7 +12773,7 @@ async def spds_leader(
         )
     except ValueError as exc:
         raise ToolError(f"spds_leader: {exc}") from exc
-    handles = await _spds_draw(ctx, prims, scale=scale)
+    handles = await _spds_draw(ctx, prims, scale=scale, record=_spds_mark_record("leader", scale))
     return {"ok": True, "entities": len(handles), "handles": handles}
 
 
@@ -12577,7 +12808,7 @@ async def spds_section_mark(
         prims = section_mark_prims((x1, y1), (x2, y2), label, side=side, scale=scale)
     except ValueError as exc:
         raise ToolError(f"spds_section_mark: {exc}") from exc
-    handles = await _spds_draw(ctx, prims, scale=scale)
+    handles = await _spds_draw(ctx, prims, scale=scale, record=_spds_mark_record("section", scale))
     return {"ok": True, "title": f"{label}-{label}", "entities": len(handles)}
 
 
@@ -12616,7 +12847,7 @@ async def spds_slope(
         prims = slope_prims((x, y), label, direction=direction, kind=kind, scale=scale)
     except ValueError as exc:
         raise ToolError(f"spds_slope: {exc}") from exc
-    handles = await _spds_draw(ctx, prims, scale=scale)
+    handles = await _spds_draw(ctx, prims, scale=scale, record=_spds_mark_record("slope", scale))
     return {"ok": True, "text": label, "entities": len(handles)}
 
 
@@ -12724,6 +12955,7 @@ async def spds_soil_hatch(
                 Txt((label_at[0] / k, label_at[1] / k), letter, 2.5, "Текст", "MC"),
             ],
             scale=k,
+            record=_spds_mark_record("soil", k, lambda _p: {"soil": key, "grade": grade}),
         )
         out["letter"] = letter
     return out

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "autocad-1-7": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "server.py"
+      ],
+      "env": {
+        "AUTOCAD_MCP_BACKEND": "com",
+        "TOOL_CONFIG": "spds",
+        "ALLOWED_PATHS": "${USERPROFILE}/Documents/AutoCAD"
+      }
+    }
+  }
+}

@@ -1600,6 +1600,9 @@ TOOL_ALIASES: dict[str, ToolAliases] = {
             "russian title block",
         ),
     ),
+    "spds_sheet_update": ToolAliases(
+        synonyms=("edit title block", "update stamp fields", "change sheet number"),
+    ),
     "spds_axis": ToolAliases(synonyms=("grid line with bubble", "column axis mark", "axis bubble")),
     "spds_axis_grid": ToolAliases(
         synonyms=("structural grid", "column grid", "grid lines with bubbles", "axis grid")
@@ -2882,6 +2885,7 @@ _RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("настроить спдс", "слои по госту", "стили по госту", "оформление по госту"),
     ),
     "spds_sheet": ((), ("рамка", "штамп", "основная надпись", "форма 3", "рамка со штампом")),
+    "spds_sheet_update": ((), ("изменить штамп", "графы штампа", "номер листа", "поправить штамп")),
     "spds_axis": ((), ("ось", "координационная ось", "марка оси")),
     "spds_axis_grid": ((), ("сетка осей", "координационные оси", "оси здания")),
     "spds_elevation": ((), ("отметка", "высотная отметка", "отметка уровня")),

@@ -74,7 +74,7 @@ async def test_system_about_uses_package_version_and_capability_summary(backend)
     class Ctx:
         lifespan_context = {"backend": backend}
 
-    result = await server.system_about(ctx=Ctx())
+    result = await server.system_about(detail=True, ctx=Ctx())
 
     assert result["version"] == __version__
     assert result["capabilities"]["table"]["mode"] == "composite"

@@ -202,6 +202,7 @@ GDT_TOOLS = {"gd_frame", "datum_feature"}
 SPDS_TOOLS = {
     "spds_setup",
     "spds_sheet",
+    "spds_sheet_update",
     "spds_axis",
     "spds_axis_grid",
     "spds_elevation",
