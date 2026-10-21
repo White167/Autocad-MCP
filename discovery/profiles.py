@@ -14,6 +14,7 @@ nor the ISO title block, and neither menu can say so. A tool config can::
     descriptions   = "short"                # see discovery/compact.py
     discovery      = "hybrid"               # "off" | "search" | "hybrid"
     pinned         = ["entity_create_line"] # hybrid: listed whole; the rest via search_tools
+    responses      = "compact"              # see discovery/responses.py
 
 Every key is optional. A key the file sets wins over the environment variable
 it replaces (``base`` over ``TOOL_PROFILE``, ``packs`` over ``TOOL_PACKS``); a
@@ -77,6 +78,7 @@ class ToolConfig:
     costs: tuple[str, ...] | None = None
     descriptions: str | None = None
     discovery: str | None = None
+    responses: str | None = None
     pinned: tuple[str, ...] = ()
     ignored_keys: tuple[str, ...] = field(default=())
 
@@ -87,7 +89,7 @@ class ToolConfig:
     def report(self) -> dict:
         """The block ``system_about`` shows; empty keys are left out."""
         out: dict = {"source": self.source}
-        for key in ("path", "description", "base", "descriptions", "discovery"):
+        for key in ("path", "description", "base", "descriptions", "discovery", "responses"):
             value = getattr(self, key)
             if value is not None:
                 out[key] = value
@@ -143,6 +145,11 @@ def _parse(data: dict, *, source: str, path: Path) -> ToolConfig:
                 f"{where}: 'discovery' must be one of {', '.join(DISCOVERY_MODES)}"
             )
         discovery = discovery.lower()
+    responses = data.get("responses")
+    if responses is not None:
+        if not isinstance(responses, str) or responses.lower() not in ("full", "compact"):
+            raise ToolConfigError(f"{where}: 'responses' must be one of full, compact")
+        responses = responses.lower()
     costs = data.get("costs")
     note = data.get("description")
     return ToolConfig(
@@ -157,6 +164,7 @@ def _parse(data: dict, *, source: str, path: Path) -> ToolConfig:
         costs=_str_list(costs, "costs", where) if costs is not None else None,
         descriptions=descriptions,
         discovery=discovery,
+        responses=responses,
         pinned=_str_list(data.get("pinned", []), "pinned", where),
         ignored_keys=ignored,
     )

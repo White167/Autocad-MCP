@@ -469,9 +469,18 @@ def _clusters(items: list[tuple[str, Box, int]], *, link: float, pad: float) -> 
 
 
 def diff_snapshots(
-    old: Snapshot, new: Snapshot, *, tol: float = DEFAULT_TOL, move_tol: float | None = None
+    old: Snapshot,
+    new: Snapshot,
+    *,
+    tol: float = DEFAULT_TOL,
+    move_tol: float | None = None,
+    trust_handles: bool = False,
 ) -> dict:
     """Match ``new`` against ``old`` and report every change (spec §10).
+
+    ``trust_handles``: the two snapshots are one document at two moments
+    (``drawing_diff_since``), so a shared handle is the same entity even when
+    no entity is unchanged to vouch for it. Two files never are.
 
     Refuses a non-positive ``tol`` or ``move_tol`` before any work.
     """
@@ -502,7 +511,7 @@ def diff_snapshots(
     left_old = [i for i in range(len(olds)) if i not in used_old]
     # No exact match is no evidence: strangers from two fresh files share
     # handles, and so do the entities of a drawing that moved as a whole.
-    handles_stable = exact > 0 and 2 * kept_handle >= exact
+    handles_stable = trust_handles or (exact > 0 and 2 * kept_handle >= exact)
 
     pairs: list[tuple[int, int, str]] = []
     # 2. handle

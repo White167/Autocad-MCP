@@ -122,6 +122,11 @@ class Settings:
         # `descriptions` key wins over this.
         self.tool_descriptions: str = os.environ.get("TOOL_DESCRIPTIONS", "full").lower().strip()
 
+        # Tool results: "full" (default) or "compact" - a write tool's entity
+        # record shrinks to {handle, type} and floats are rounded
+        # (discovery/responses.py). A tool config's `responses` key wins.
+        self.tool_responses: str = os.environ.get("TOOL_RESPONSES", "full").lower().strip()
+
         # Tool discovery: "off" (default) advertises the full catalog; "search"
         # replaces it with a search tool plus a call_tool proxy (see
         # discovery/transform.py and server._apply_discovery_mode).

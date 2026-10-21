@@ -30,7 +30,12 @@
 | 0. Стенд замеров | ✅ уже был: `benchmarks/token_suite.py`, расширен строками коротких описаний и пресетов |
 | 1. Профили, короткие описания, hybrid, русский поиск | ✅ сделано (см. CHANGELOG, Unreleased) |
 | 3. Дешёвые скриншоты | ✅ сделано на ezdxf; COM-путь (`view_render` из снимка `Document.Export`) ждёт прогона `scripts/smoke_screenshot_com.py` на AutoCAD 2026 |
-| 2, 4, 5, 6 | впереди (следующий — 2: digest и checkpoint/diff) |
+| 2. digest, checkpoint/diff, компактные ответы | ✅ сделано: `drawing_digest`, `drawing_checkpoint`, `drawing_diff_since`, `TOOL_RESPONSES=compact` (в `spds` включён). Столбцовый формат `entity_list` не делал: у него уже есть `fields` и `compact` |
+| 4, 5, 6 | впереди (следующий — 5: баги COM, затем 4: пак СПДС) |
+
+Цикл «действие → проверка» после этапа 2 (ezdxf, лист А3 с десятком объектов):
+`drawing_diff_since` ≈ 40–80 токенов, `drawing_digest` ≈ 100 токенов, ответ на создание
+объекта в compact ≈ 10 токенов вместо ≈ 50. Скриншот 800 px остаётся ≈ 600 токенов.
 
 Скриншот по умолчанию: 800 px вместо 1600, лист А3 стоит ≈ 600 токенов вместо ≈ 1 850.
 Окно 120×60 мм при ширине 600 px — ≈ 240 токенов. Попутно исправлено: headless-рендер
@@ -41,12 +46,12 @@
 
 | Поверхность | Инструментов в списке | ≈ токенов |
 |---|---:|---:|
-| `full` (по умолчанию) | 243 | 58 200 |
-| `TOOL_DESCRIPTIONS=short` | 243 | 28 900 |
-| `lean` + `short` | 66 | 8 400 |
-| `TOOL_CONFIG=drafting` | 177 | 19 200 |
-| `TOOL_CONFIG=review` | 70 | 6 500 |
-| `TOOL_CONFIG=spds` (hybrid: 61 закреплён, ещё 106 через поиск) | 63 | **6 600** |
+| `full` (по умолчанию) | 246 | 59 000 |
+| `TOOL_DESCRIPTIONS=short` | 246 | 29 400 |
+| `lean` + `short` | 69 | 8 800 |
+| `TOOL_CONFIG=drafting` | 180 | 19 700 |
+| `TOOL_CONFIG=review` | 73 | 7 000 |
+| `TOOL_CONFIG=spds` (hybrid: 64 закреплено, ещё 106 через поиск) | 66 | **7 100** |
 
 ---
 

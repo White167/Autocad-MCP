@@ -3,7 +3,7 @@
   "schema_version": 1,
   "package_version": "1.6.0",
   "totals": {
-    "tools": 248,
+    "tools": 251,
     "resources": 8,
     "prompts": 5,
     "groups": 28
@@ -34,7 +34,7 @@
     "system": 8,
     "templates": 2,
     "transactions": 3,
-    "understanding": 4,
+    "understanding": 7,
     "validation": 1,
     "view": 4
   },
@@ -871,6 +871,21 @@
       }
     },
     {
+      "name": "drawing_checkpoint",
+      "group": "understanding",
+      "cost": "read",
+      "summary": "Remember the drawing now, so drawing_diff_since can report only what changed.",
+      "tags": [
+        "analysis",
+        "query",
+        "understand"
+      ],
+      "annotations": {
+        "title": "Drawing Checkpoint",
+        "readOnlyHint": true
+      }
+    },
+    {
       "name": "drawing_close",
       "group": "drawing",
       "cost": "destructive",
@@ -927,6 +942,36 @@
       "annotations": {
         "title": "Drawing: Diff Two Revisions",
         "destructiveHint": false
+      }
+    },
+    {
+      "name": "drawing_diff_since",
+      "group": "understanding",
+      "cost": "read",
+      "summary": "What changed since a checkpoint: added, changed, removed entities, one line each.",
+      "tags": [
+        "analysis",
+        "query",
+        "understand"
+      ],
+      "annotations": {
+        "title": "Diff Since Checkpoint",
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "drawing_digest",
+      "group": "understanding",
+      "cost": "read",
+      "summary": "State of the drawing in a few lines: counts by layer, extents, warnings.",
+      "tags": [
+        "analysis",
+        "query",
+        "understand"
+      ],
+      "annotations": {
+        "title": "Drawing Digest",
+        "readOnlyHint": true
       }
     },
     {

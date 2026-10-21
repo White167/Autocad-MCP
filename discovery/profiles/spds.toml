@@ -25,6 +25,8 @@ exclude = [
 # A live seat with the user's own drawings open: switching between them.
 include = ["document_list", "document_activate"]
 descriptions = "short"
+# A write tool answers {handle, type}; entity_get reads the rest when needed.
+responses = "compact"
 
 # Listed whole: what an СПДС sheet uses on most turns. Everything else the
 # filters above leave enabled is one search_tools call away (call_tool runs it).
@@ -46,6 +48,7 @@ pinned = [
     "entity_extend", "entity_edit_text", "entity_edit_geometry",
     # reading
     "entity_list", "entity_get", "analysis_bounding_box", "drawing_critique",
+    "drawing_digest", "drawing_checkpoint", "drawing_diff_since",
     # layers, blocks, sheets
     "layer_create", "layer_list", "layer_set_current", "layer_modify", "block_insert",
     "linetype_list", "analysis_layer_stats",

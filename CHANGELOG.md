@@ -11,8 +11,8 @@ The first stage of the token-economy roadmap
 (`docs/plans/token-economy-roadmap.md`): a client pays for the tools it uses,
 and for less text per tool. Measured with `benchmarks/token_suite.py` on the
 model-visible listing (name + description + input schema, `prompt_chars`):
-the default surface is ≈ 58,200 tokens, the bundled `spds` profile is
-≈ 6,600.
+the default surface is ≈ 59,000 tokens, the bundled `spds` profile is
+≈ 7,100.
 
 ### Added
 
@@ -34,7 +34,34 @@ the default surface is ≈ 58,200 tokens, the bundled `spds` profile is
   `required` are untouched; the transform rewrites only the listing, so every
   call is still validated by the registered schema. The server instructions
   switch to a short, discipline-neutral text. This mode halves the
-  model-visible listing: 58.2k → 28.9k tokens on the default surface.
+  model-visible listing: 59.0k → 29.4k tokens on the default surface.
+- **`drawing_digest`** (stage 2, `engineering/digest.py`) replaces a
+  screenshot after a series of edits. It reports, in a few hundred
+  characters, the entities per layer and type, the robust extents and their
+  outliers, a text-height histogram, and warnings: `open_ends`, `near_miss` and
+  `crossing` on contour layers (the `drawing_topology_check` engine),
+  `not_closed`, `outside_frame` (the frame given, or the largest rectangle),
+  `duplicate`, `zero_size`, `text_height` (against the heights given),
+  `construction_left` and `layer_0`. Each warning has a count of entities and at
+  most five handles. `format="json"` returns the dict. Read-only; one snapshot.
+- **`drawing_checkpoint` / `drawing_diff_since`**
+  (`engineering/checkpoint.py`). A checkpoint keeps a snapshot in the server's
+  memory, and the diff since it lists only the added, changed and removed
+  entities, one line each (`~ 2F CIRCLE GEOMETRY: radius 10->12`). It uses
+  `drawing_diff`'s matching with the handles trusted, because both snapshots
+  are one document. A checkpoint taken on another document is refused, and
+  `drawing_new` / `drawing_open` drop every checkpoint. `advance` (default)
+  re-arms the checkpoint after each diff.
+- **`TOOL_RESPONSES=compact`** (and `responses = "compact"` in a tool config;
+  the `spds` preset sets it, `discovery/responses.py`). A write tool's entity
+  record shrinks to `{handle, type}` (≈ 30 characters, down from ≈ 200 for a
+  circle). Every float is rounded to four decimals. Read tools keep their
+  records. A call through `call_tool` is judged by the tool it names. Steps
+  inside `cad_batch` are not touched, so a binding like `$name.properties` still
+  resolves.
+- The text-form tools (`drawing_digest`, `drawing_diff_since`) declare no
+  output schema, so their answer is sent once as text rather than as text plus
+  a structured copy.
 - **`tool_help(name)`** (SECTION 11, lean): the full docstring and input schema
   behind a short summary. An unknown name answers with the nearest tool names.
 - **`DISCOVERY_MODE=hybrid`** (and `discovery = "hybrid"` in a tool config).
@@ -66,7 +93,11 @@ the default surface is ≈ 58,200 tokens, the bundled `spds` profile is
 - **Packs `gear` and `gdt`.** `gear_draw_*` / `keyway_draw_*` and `gd_frame` /
   `datum_feature` left `core`. `TOOL_PACKS=core` now hides them; a mechanical
   client asks for `core,mech,gear,gdt`. `drawing_finalize` stays core.
-- 248 registered tools (`tool_help`); lean is 66.
+- 251 registered tools (`tool_help`, `drawing_digest`, `drawing_checkpoint`,
+  `drawing_diff_since`); lean is 69, with the last four in it.
+- `diff_snapshots(..., trust_handles=True)`: one document at two moments
+  pairs a shared handle even when no unchanged entity vouches for it. Before
+  this, a lone moved entity read as removed plus added.
 
 ### Fixed
 

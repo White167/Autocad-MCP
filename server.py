@@ -234,6 +234,41 @@ class CapabilityRefusalMiddleware(Middleware):
             )
 
 
+#: TOOL_RESPONSES / a tool config's ``responses`` (discovery/responses.py),
+#: set by _apply_tool_profile together with each tool's @cad_tool cost.
+_RESPONSE_MODE = "full"
+_TOOL_COSTS: dict[str, str] = {}
+
+
+class CompactResponseMiddleware(Middleware):
+    """``responses = "compact"``: a write tool's entity record shrinks to its
+    handle and type, and every float is rounded (discovery/responses.py).
+
+    Only the result is rewritten; the tool ran exactly as it would have. A
+    call through the search proxy (``call_tool``) is judged by the tool it
+    names. An error result, an image and a text-only result pass untouched.
+    """
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        result = await call_next(context)
+        if _RESPONSE_MODE != "compact" or getattr(result, "is_error", False):
+            return result
+        structured = getattr(result, "structured_content", None)
+        if structured is None:
+            return result
+        from discovery.responses import compact_value
+
+        name = context.message.name
+        if name == "call_tool":
+            name = str((context.message.arguments or {}).get("name") or name)
+        write = _TOOL_COSTS.get(name, "read") != "read"
+        compact = compact_value(structured, write=write)
+        if compact == structured:
+            return result
+        text = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        return ToolResult(content=text, structured_content=compact, meta=result.meta)
+
+
 # ---------------------------------------------------------------------------
 # HTTP auth
 # ---------------------------------------------------------------------------
@@ -306,6 +341,7 @@ mcp.add_middleware(ErrorHandlingMiddleware())
 mcp.add_middleware(AuditMiddleware())
 mcp.add_middleware(TimingMiddleware())
 mcp.add_middleware(LoggingMiddleware())
+mcp.add_middleware(CompactResponseMiddleware())
 # Added last on purpose: first-added is outermost, so this sits innermost —
 # closest to the call_tool wrap, where the refusal's __cause__ chain is still
 # intact. Anywhere further out and AuditMiddleware would log the raise before
@@ -1003,6 +1039,12 @@ LEAN_TOOL_NAMES = frozenset(
         # tool, so TOOL_PACKS=core keeps it; with the four architectural ones
         # above, lean is 65. The takeoffs are `plant`-pack, full-profile work.
         "drawing_understand",
+        # v1.7: the cheap ways to see what a series of edits did - a digest
+        # instead of a screenshot, a checkpoint and the diff since it instead
+        # of listing every entity again. Core-pack tools; lean is 69.
+        "drawing_digest",
+        "drawing_checkpoint",
+        "drawing_diff_since",
     }
 )
 
@@ -1278,6 +1320,28 @@ def _apply_profile_discovery(tool_config, enabled: set[str]) -> dict | None:
     return block
 
 
+def _apply_response_mode(tool_config, registered: dict) -> str:
+    """Set the CompactResponseMiddleware mode; returns the mode applied."""
+    global _RESPONSE_MODE
+    from discovery.responses import RESPONSE_MODES
+
+    mode = (tool_config.responses or config.settings.tool_responses or "full").lower().strip()
+    if mode not in RESPONSE_MODES:
+        log.warning(
+            "Unknown TOOL_RESPONSES %r - falling back to 'full'. Valid modes: %s.",
+            mode,
+            ", ".join(RESPONSE_MODES),
+        )
+        mode = "full"
+    _TOOL_COSTS.clear()
+    for name, tool in registered.items():
+        cost = ((getattr(tool, "meta", None) or {}).get("cad") or {}).get("cost")
+        if cost:
+            _TOOL_COSTS[name] = cost
+    _RESPONSE_MODE = mode
+    return mode
+
+
 async def _apply_tool_profile(profile: str | None = None) -> dict:
     """Enable/disable registered tools according to the selected profile.
 
@@ -1336,6 +1400,7 @@ async def _apply_tool_profile(profile: str | None = None) -> dict:
         tool_config.descriptions or config.settings.tool_descriptions or "full"
     )
     discovery = _apply_profile_discovery(tool_config, enabled)
+    responses = _apply_response_mode(tool_config, registered)
     _active_tool_profile = {
         "profile": selected,
         "registered_count": len(registered),
@@ -1343,6 +1408,7 @@ async def _apply_tool_profile(profile: str | None = None) -> dict:
         "disabled_count": len(disabled),
         "disabled_tools": disabled,
         "descriptions": descriptions,
+        "responses": responses,
     }
     if discovery is not None:
         _active_tool_profile["discovery"] = discovery
@@ -1459,6 +1525,8 @@ async def drawing_new(
         template = resolved
     await ctx.info(f"Creating new drawing (template={template}, bootstrap={bootstrap})")
     raw = await backend.drawing_new(template)
+    if _CHECKPOINTS is not None:
+        _CHECKPOINTS.clear()  # a checkpoint names a document, and that is not this one
     result = dict(raw) if isinstance(raw, dict) else {"result": raw}
     converted = result.pop("template_dwt", None)
     if template_info is not None:
@@ -1513,6 +1581,8 @@ async def drawing_open(
     await ctx.info(f"Opening drawing: {validated}")
     await ctx.report_progress(0, 100)
     result = await backend.drawing_open(str(validated))
+    if _CHECKPOINTS is not None:
+        _CHECKPOINTS.clear()  # a checkpoint names a document, and that is not this one
     await ctx.report_progress(100, 100)
     return result
 
@@ -5361,7 +5431,7 @@ async def view_screenshot(
     render: Annotated[_RenderRoute, Field(default="auto", description=_RENDER_DOC)] = "auto",
     ctx: Context = None,
 ):
-    """Capture an image of the drawing.
+    """Capture a screenshot of the current drawing view.
 
     A screenshot is billed by its pixels, not its bytes, so frame it (`window`)
     and keep it small (`width`, 800 by default since v1.7; 1600 before) - and
@@ -10944,7 +11014,7 @@ async def arch_plan_from_spec(
 
 
 # ---------------------------------------------------------------------------
-# ── SECTION 26: Understanding & QA (4 tools) ────────────────────────────────
+# ── SECTION 26: Understanding & QA (7 tools) ────────────────────────────────
 # ---------------------------------------------------------------------------
 
 
@@ -11411,6 +11481,201 @@ async def drawing_topology_check(
     report["source"] = snap.source
     report["classification"] = [row for row in classification if row["layer"] in set(chosen)]
     return report
+
+
+#: drawing_checkpoint / drawing_diff_since: snapshots held in this process.
+_CHECKPOINTS = None
+
+
+def _checkpoints():
+    global _CHECKPOINTS
+    if _CHECKPOINTS is None:
+        from engineering.checkpoint import CheckpointStore
+
+        _CHECKPOINTS = CheckpointStore()
+    return _CHECKPOINTS
+
+
+async def _current_snapshot(ctx: Context):
+    from ezdxf.lldxf.const import DXFError
+
+    from engineering.understand.snapshot import take_snapshot
+
+    try:
+        return await take_snapshot(_backend(ctx), None)
+    except (ValueError, OSError, RuntimeError, DXFError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
+_TEXT_OR_JSON = Literal["text", "json"]
+
+
+@cad_tool(
+    summary="State of the drawing in a few lines: counts by layer, extents, warnings.",
+    cost="read",
+)
+@mcp.tool(
+    annotations={"title": "Drawing Digest", "readOnlyHint": True},
+    tags={"understand", "analysis", "query"},
+    output_schema=None,
+)
+async def drawing_digest(
+    space: Annotated[
+        str | None, Field(default=None, description="model (default) or a layout name.")
+    ] = None,
+    window: Annotated[
+        list[float] | None,
+        Field(
+            default=None,
+            min_length=4,
+            max_length=4,
+            description="Only entities touching [x1, y1, x2, y2] (drawing units).",
+        ),
+    ] = None,
+    layers: Annotated[
+        list[str] | None, Field(default=None, description="Only entities on these layers.")
+    ] = None,
+    frame: Annotated[
+        list[float] | None,
+        Field(
+            default=None,
+            min_length=4,
+            max_length=4,
+            description="The sheet frame [x1, y1, x2, y2] for outside_frame; default: the "
+            "largest rectangle covering a quarter of the extents.",
+        ),
+    ] = None,
+    text_heights: Annotated[
+        list[float] | None,
+        Field(
+            default=None,
+            description="Allowed text heights in drawing units (e.g. [2.5, 3.5, 5, 7] x scale); "
+            "others are flagged.",
+        ),
+    ] = None,
+    format: Annotated[
+        _TEXT_OR_JSON, Field(default="text", description="text (dense, default) or json.")
+    ] = "text",
+    max_chars: Annotated[
+        int, Field(default=1500, ge=300, le=20000, description="Budget for the text form.")
+    ] = 1500,
+    ctx: Context = None,
+):
+    """A compact report of the drawing's state - the cheap replacement for a
+    screenshot after a series of edits. Read-only (one snapshot: headless the
+    document in memory, live a `Document.Export` copy).
+
+    Reports entities per layer and type; the robust extents and the outliers
+    that stretch them; the text-height histogram; and warnings, each a count
+    and at most five handles: `open_ends` / `near_miss` / `crossing` on contour
+    layers (continuous linetype, not a construction / dimension / text / hatch
+    / axis layer by name), `not_closed` (an open polyline whose ends meet),
+    `outside_frame`, `duplicate`, `zero_size`, `text_height` (only with
+    `text_heights`), `construction_left` (CONSTRUCTION / _OUT layers) and
+    `layer_0`. `text` (default) is a few hundred characters under `max_chars`;
+    `json` is the full dict. Heuristics are declared in `engineering/digest.py`.
+    """
+    from engineering.digest import digest, render_text
+
+    snap = await _current_snapshot(ctx)
+    try:
+        result = await asyncio.to_thread(
+            digest,
+            snap,
+            space=space,
+            window=window,
+            layers=layers,
+            frame=frame,
+            text_heights=text_heights,
+        )
+    except ValueError as exc:
+        raise ToolError(f"drawing_digest: {exc}") from exc
+    if format == "json":
+        return result
+    return render_text(result, max_chars)
+
+
+@cad_tool(
+    summary="Remember the drawing now, so drawing_diff_since can report only what changed.",
+    cost="read",
+)
+@mcp.tool(
+    annotations={"title": "Drawing Checkpoint", "readOnlyHint": True},
+    tags={"understand", "analysis", "query"},
+)
+async def drawing_checkpoint(
+    name: Annotated[str, Field(default="default", min_length=1, max_length=64)] = "default",
+    ctx: Context = None,
+) -> dict:
+    """Take a snapshot of the current document and keep it in the server's
+    memory under `name` (16 at most; the oldest goes). Nothing is written to
+    the drawing and nothing survives a server restart. `drawing_new` and
+    `drawing_open` drop every checkpoint.
+    """
+    snap = await _current_snapshot(ctx)
+    _checkpoints().put(name, snap)
+    return {"name": name, "entities": len(snap.records), "document": snap.source}
+
+
+@cad_tool(
+    summary="What changed since a checkpoint: added, changed, removed entities, one line each.",
+    cost="read",
+)
+@mcp.tool(
+    annotations={"title": "Diff Since Checkpoint", "readOnlyHint": True},
+    tags={"understand", "analysis", "query"},
+    output_schema=None,
+)
+async def drawing_diff_since(
+    name: Annotated[str, Field(default="default", min_length=1, max_length=64)] = "default",
+    limit: Annotated[int, Field(default=30, ge=1, le=1000, description="Rows kept per list.")] = 30,
+    tol: Annotated[
+        float, Field(default=0.01, gt=0, description="Geometry compared rounded to this.")
+    ] = 0.01,
+    advance: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="Move the checkpoint to now, so the next call reports only newer edits.",
+        ),
+    ] = True,
+    format: Annotated[
+        _TEXT_OR_JSON, Field(default="text", description="text (default) or json.")
+    ] = "text",
+    ctx: Context = None,
+):
+    """The entities added, changed and removed since `drawing_checkpoint(name)`,
+    one short line each (`+ 3D LINE GEOMETRY 0,0->100,0`, `~ 2F CIRCLE GEOMETRY:
+    radius 10->12`, `- 30 TEXT ...`). Matching is `drawing_diff`'s: identical
+    signature, then the same handle, then the nearest entity of its type and
+    layer. With no checkpoint of that name, one is taken now and the answer
+    says so. A checkpoint of another document is refused, never diffed.
+    Read-only; `advance` (default) re-arms the checkpoint at the new state.
+    """
+    from engineering.checkpoint import compact_diff, render_diff_text
+
+    store = _checkpoints()
+    snap = await _current_snapshot(ctx)
+    cp = store.get(name)
+    if cp is None:
+        store.put(name, snap)
+        msg = f'no checkpoint "{name}" yet: taken now ({len(snap.records)} entities)'
+        return msg if format == "text" else {"name": name, "created": True, "message": msg}
+    if cp.snapshot.source != snap.source:
+        raise ToolError(
+            f'drawing_diff_since: checkpoint "{name}" was taken on {cp.snapshot.source}, the '
+            f"current document is {snap.source}; take a new checkpoint here"
+        )
+    try:
+        result = await asyncio.to_thread(compact_diff, cp.snapshot, snap, tol=tol, limit=limit)
+    except ValueError as exc:
+        raise ToolError(f"drawing_diff_since: {exc}") from exc
+    age = cp.age_s
+    if advance:
+        store.put(name, snap)
+    if format == "json":
+        return {"name": name, "age_s": round(age, 1), **result}
+    return render_diff_text(result, name=name, age_s=age)
 
 
 # ---------------------------------------------------------------------------

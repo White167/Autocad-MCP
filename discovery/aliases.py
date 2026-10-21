@@ -1558,6 +1558,32 @@ TOOL_ALIASES: dict[str, ToolAliases] = {
             "version information",
         ),
     ),
+    "drawing_digest": ToolAliases(
+        synonyms=(
+            "digest",
+            "summary of the drawing",
+            "what is on the drawing",
+            "check the drawing state",
+            "anything outside the frame",
+            "open contours",
+            "instead of a screenshot",
+        ),
+    ),
+    "drawing_checkpoint": ToolAliases(
+        synonyms=(
+            "checkpoint",
+            "remember the drawing state",
+            "mark the state before editing",
+        ),
+    ),
+    "drawing_diff_since": ToolAliases(
+        synonyms=(
+            "what changed",
+            "changes since",
+            "diff since checkpoint",
+            "what did my edits do",
+        ),
+    ),
     "tool_help": ToolAliases(
         acad=("HELP",),
         synonyms=(
@@ -2818,6 +2844,9 @@ _RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "transaction_begin": ((), ("начать транзакцию",)),
     "transaction_rollback": ((), ("откатить", "откат")),
     "tool_help": ((), ("справка по инструменту", "описание инструмента")),
+    "drawing_digest": ((), ("сводка по чертежу", "состояние чертежа", "что на чертеже сейчас")),
+    "drawing_checkpoint": ((), ("контрольная точка", "запомнить состояние")),
+    "drawing_diff_since": ((), ("что изменилось", "изменения с контрольной точки")),
 }
 
 _fold_in(TOOL_ALIASES, _RUSSIAN_VOCABULARY)
