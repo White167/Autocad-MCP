@@ -16,6 +16,38 @@ if TYPE_CHECKING:
     from backends.base import EntityInfo
 
 
+#: TEXT justification codes -> (DXF 72 horizontal, DXF 73 vertical), as AutoCAD's
+#: TEXT command names them: L / C / R / M on the baseline (M = middle of the
+#: text), then T / M / B rows x L / C / R columns.
+TEXT_ALIGN_CODES: dict[str, tuple[int, int]] = {
+    "L": (0, 0),
+    "C": (1, 0),
+    "R": (2, 0),
+    "M": (4, 0),
+    "BL": (0, 1),
+    "BC": (1, 1),
+    "BR": (2, 1),
+    "ML": (0, 2),
+    "MC": (1, 2),
+    "MR": (2, 2),
+    "TL": (0, 3),
+    "TC": (1, 3),
+    "TR": (2, 3),
+}
+
+
+def text_align_code(align: str | None) -> str | None:
+    """Normalise a justification code; refuse an unknown one with the list."""
+    if align is None:
+        return None
+    code = str(align).strip().upper()
+    if code not in TEXT_ALIGN_CODES:
+        raise ValueError(
+            f"align {align!r} is not a TEXT justification; use one of {', '.join(TEXT_ALIGN_CODES)}"
+        )
+    return code
+
+
 class EntityCreationContract(ABC):
     @abstractmethod
     async def entity_create_line(
@@ -72,7 +104,14 @@ class EntityCreationContract(ABC):
         rotation: float = 0.0,
         layer: str | None = None,
         color: int | None = None,
-    ) -> EntityInfo: ...
+        style: str | None = None,
+        align: str | None = None,
+        width_factor: float | None = None,
+    ) -> EntityInfo:
+        """``style`` must name an existing text style (refused by name otherwise);
+        ``align`` is one of :data:`TEXT_ALIGN_CODES` and makes ``(x, y)`` the
+        alignment point rather than the left baseline start (v1.7)."""
+        ...
 
     @abstractmethod
     async def entity_create_mtext(

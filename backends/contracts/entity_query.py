@@ -14,6 +14,42 @@ if TYPE_CHECKING:
     from backends.base import EntityInfo
 
 
+def edited_polyline_vertices(
+    current: list[tuple[float, float]],
+    vertices: list[list[float]] | None,
+    vertex_index: int | None,
+    vx: float | None,
+    vy: float | None,
+) -> list[tuple[float, float]] | None:
+    """The polyline's new WCS vertices, or None when no vertex argument was given.
+
+    ``vertices`` (at least two [x, y] pairs) and ``vertex_index`` are exclusive;
+    ``vertex_index`` needs ``vx`` or ``vy`` and counts from the end when
+    negative (-1 is the last vertex: extending an axis to the bottom of a
+    section is a move of its last vertex, not a new line).
+    """
+    if vertices is not None and vertex_index is not None:
+        raise ValueError("give vertices or vertex_index, not both")
+    if vertices is not None:
+        if len(vertices) < 2 or any(len(v) != 2 for v in vertices):
+            raise ValueError("vertices must be at least two [x, y] pairs")
+        return [(float(v[0]), float(v[1])) for v in vertices]
+    if vertex_index is None:
+        if vx is not None or vy is not None:
+            raise ValueError("vx / vy need vertex_index")
+        return None
+    if vx is None and vy is None:
+        raise ValueError("vertex_index needs vx and/or vy")
+    n = len(current)
+    if not -n <= int(vertex_index) < n:
+        raise ValueError(f"vertex_index {vertex_index} is outside 0..{n - 1} (or -{n}..-1)")
+    out = list(current)
+    i = int(vertex_index) % n
+    x, y = out[i]
+    out[i] = (float(vx) if vx is not None else x, float(vy) if vy is not None else y)
+    return out
+
+
 class EntityQueryContract(ABC):
     # ── selection filters (M8 / F1) ──────────────────────────────────────────
 
@@ -116,11 +152,21 @@ class EntityQueryContract(ABC):
         y2: float | None = None,
         start_angle: float | None = None,
         end_angle: float | None = None,
+        vertices: list[list[float]] | None = None,
+        vertex_index: int | None = None,
+        vx: float | None = None,
+        vy: float | None = None,
+        closed: bool | None = None,
     ) -> EntityInfo:
         """Edit the defining geometry of an existing entity in place.
         - CIRCLE: cx / cy / radius
         - LINE: x1 / y1 (start), x2 / y2 (end)
         - ARC: cx / cy / radius / start_angle / end_angle (degrees)
+        - LWPOLYLINE (v1.7): ``vertices`` replaces every vertex, or
+          ``vertex_index`` + ``vx`` / ``vy`` moves one (negative counts from
+          the end); ``closed`` sets the closed flag. Bulges are kept when the
+          vertex count is unchanged, else cleared (see
+          :func:`edited_polyline_vertices`).
         Any argument left None is unchanged. Raises for unsupported types."""
         ...
 

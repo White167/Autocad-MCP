@@ -78,8 +78,15 @@ class LayoutContract(ABC):
         view_center_x: float,
         view_center_y: float,
         scale: float = 1.0,
+        remove_others: bool = False,
     ) -> dict:
         """Place a scaled model-space viewport on a paper-space layout.
+
+        ``remove_others`` (v1.7) deletes every other viewport on that layout -
+        the one AutoCAD creates by itself on a layout's first activation, which
+        sits over the new one and shows the wrong area - and reports their
+        handles in ``removed``. The layout's own paper-space viewport is never
+        touched.
 
         ``scale`` is paper:model (1.0 = 1:1, 0.5 = 1:2). The viewport shows
         the model window centered at (view_center_x, view_center_y) with

@@ -1892,11 +1892,46 @@ async def entity_create_text(
     rotation: Annotated[float, "Rotation angle in degrees"] = 0.0,
     layer: Annotated[str | None, "Layer name"] = None,
     color: Annotated[int | None, "ACI color code"] = None,
+    style: Annotated[
+        str | None,
+        Field(default=None, description="Text style name (must exist); default: the current one."),
+    ] = None,
+    align: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Justification: L C R M, or TL TC TR ML MC MR BL BC BR; (x, y) is then "
+            "the alignment point.",
+        ),
+    ] = None,
+    width_factor: Annotated[
+        float | None,
+        Field(default=None, gt=0, le=10, description="Width factor (1 = as designed)."),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a single-line text entity (DTEXT/TEXT)."""
+    """Create a single-line text entity (DTEXT/TEXT).
+
+    v1.7: `style` (refused by name when it does not exist, with the list),
+    `align` (AutoCAD's TEXT justifications; with any but `L`, `(x, y)` is the
+    alignment point, so `MC` centres the text on it) and `width_factor`.
+    """
     await ctx.debug(f"Creating text: '{text[:30]}' at ({x},{y})")
-    result = await _backend(ctx).entity_create_text(text, x, y, height, rotation, layer, color)
+    try:
+        result = await _backend(ctx).entity_create_text(
+            text,
+            x,
+            y,
+            height,
+            rotation,
+            layer,
+            color,
+            style=style,
+            align=align,
+            width_factor=width_factor,
+        )
+    except ValueError as exc:
+        raise ToolError(f"entity_create_text: {exc}") from exc
     return _dc(result)
 
 
@@ -2249,6 +2284,50 @@ def _fit_to_tolerances(
     )
 
 
+_DIMSTYLE_PARAM_DOC = (
+    "Dimension style to draw with (must exist); default: the current one. The current "
+    "style is restored afterwards."
+)
+
+
+class _DimstyleFor:
+    """``async with _DimstyleFor(backend, name):`` - draw with ``name``, then put the
+    current dimension style back.
+
+    Both engines dimension with the *current* style (AutoCAD reads the active
+    saved style, measured by the autocad-spds skill: a `setvar` override is
+    ignored), so a per-call style is a switch and a switch back, through the
+    same `dimstyle_set_current` path the tool of that name uses. A style that
+    does not exist is refused by name with the list, before anything is drawn.
+    """
+
+    def __init__(self, backend, name: str | None):
+        self.backend = backend
+        self.name = name
+        self.previous: str | None = None
+
+    async def __aenter__(self):
+        if not self.name:
+            return self
+        rows = await self.backend.dimstyle_list()
+        names = [row["name"] for row in rows]
+        found = next((n for n in names if n.lower() == self.name.strip().lower()), None)
+        if found is None:
+            raise ToolError(
+                f"dimstyle {self.name!r} does not exist; styles: {', '.join(sorted(names))}"
+            )
+        current = next((row["name"] for row in rows if row.get("current")), None)
+        if current != found:
+            await self.backend.dimstyle_set_current(found)
+            self.previous = current
+        return self
+
+    async def __aexit__(self, *exc):
+        if self.previous is not None:
+            await self.backend.dimstyle_set_current(self.previous)
+        return False
+
+
 @cad_tool(
     summary="Dimension a horizontal or vertical size, with an ISO 129 tolerance or ISO 286 fit.",
     cost="mutate",
@@ -2284,6 +2363,7 @@ async def dimension_linear(
         "ISO 286 fit code (e.g. 'H7', 'g6', 'js9'); resolves deviations from the "
         "authored tables for the measured nominal. Mutually exclusive with tol_*.",
     ] = None,
+    dimstyle: Annotated[str | None, Field(default=None, description=_DIMSTYLE_PARAM_DOC)] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a linear dimension, optionally toleranced (ISO 129 or ISO 286 fit)."""
@@ -2292,20 +2372,22 @@ async def dimension_linear(
     tol_upper, tol_lower, tol_mode, text_override = _fit_to_tolerances(
         fit, nominal, tol_upper, tol_lower, tol_mode, text_override
     )
-    result = await _backend(ctx).dimension_linear(
-        x1,
-        y1,
-        x2,
-        y2,
-        dim_x,
-        dim_y,
-        rotation,
-        layer,
-        tol_upper,
-        tol_lower,
-        tol_mode,
-        text_override,
-    )
+    backend = _backend(ctx)
+    async with _DimstyleFor(backend, dimstyle):
+        result = await backend.dimension_linear(
+            x1,
+            y1,
+            x2,
+            y2,
+            dim_x,
+            dim_y,
+            rotation,
+            layer,
+            tol_upper,
+            tol_lower,
+            tol_mode,
+            text_override,
+        )
     return _dc(result)
 
 
@@ -2322,10 +2404,13 @@ async def dimension_aligned(
     dim_x: Annotated[float, "Dimension line position X"],
     dim_y: Annotated[float, "Dimension line position Y"],
     layer: Annotated[str | None, "Layer name"] = None,
+    dimstyle: Annotated[str | None, Field(default=None, description=_DIMSTYLE_PARAM_DOC)] = None,
     ctx: Context = None,
 ) -> dict:
     """Create an aligned dimension that measures the true distance between two points."""
-    result = await _backend(ctx).dimension_aligned(x1, y1, x2, y2, dim_x, dim_y, layer)
+    backend = _backend(ctx)
+    async with _DimstyleFor(backend, dimstyle):
+        result = await backend.dimension_aligned(x1, y1, x2, y2, dim_x, dim_y, layer)
     return _dc(result)
 
 
@@ -2344,12 +2429,15 @@ async def dimension_angular(
     text_x: Annotated[float, "Dimension text position X"],
     text_y: Annotated[float, "Dimension text position Y"],
     layer: Annotated[str | None, "Layer name"] = None,
+    dimstyle: Annotated[str | None, Field(default=None, description=_DIMSTYLE_PARAM_DOC)] = None,
     ctx: Context = None,
 ) -> dict:
     """Create an angular dimension measuring the angle between two lines from a vertex."""
-    result = await _backend(ctx).dimension_angular(
-        vertex_x, vertex_y, x1, y1, x2, y2, text_x, text_y, layer
-    )
+    backend = _backend(ctx)
+    async with _DimstyleFor(backend, dimstyle):
+        result = await backend.dimension_angular(
+            vertex_x, vertex_y, x1, y1, x2, y2, text_x, text_y, layer
+        )
     return _dc(result)
 
 
@@ -2381,6 +2469,7 @@ async def dimension_radius(
         str | None,
         "ISO 286 fit code resolved for the measured radius value. Mutually exclusive with tol_*.",
     ] = None,
+    dimstyle: Annotated[str | None, Field(default=None, description=_DIMSTYLE_PARAM_DOC)] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a radius dimension for a circle or arc, optionally toleranced."""
@@ -2388,18 +2477,20 @@ async def dimension_radius(
     tol_upper, tol_lower, tol_mode, text_override = _fit_to_tolerances(
         fit, nominal, tol_upper, tol_lower, tol_mode, text_override
     )
-    result = await _backend(ctx).dimension_radius(
-        center_x,
-        center_y,
-        chord_x,
-        chord_y,
-        leader_length,
-        layer,
-        tol_upper,
-        tol_lower,
-        tol_mode,
-        text_override,
-    )
+    backend = _backend(ctx)
+    async with _DimstyleFor(backend, dimstyle):
+        result = await backend.dimension_radius(
+            center_x,
+            center_y,
+            chord_x,
+            chord_y,
+            leader_length,
+            layer,
+            tol_upper,
+            tol_lower,
+            tol_mode,
+            text_override,
+        )
     return _dc(result)
 
 
@@ -2435,6 +2526,7 @@ async def dimension_diameter(
         "ISO 286 fit code (e.g. 'H7' hole / 'g6' shaft) resolved for the measured "
         "diameter. Mutually exclusive with tol_*.",
     ] = None,
+    dimstyle: Annotated[str | None, Field(default=None, description=_DIMSTYLE_PARAM_DOC)] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a diameter dimension for a circle, optionally toleranced (e.g. ⌀20 H7)."""
@@ -2442,18 +2534,20 @@ async def dimension_diameter(
     tol_upper, tol_lower, tol_mode, text_override = _fit_to_tolerances(
         fit, nominal, tol_upper, tol_lower, tol_mode, text_override
     )
-    result = await _backend(ctx).dimension_diameter(
-        x1,
-        y1,
-        x2,
-        y2,
-        leader_length,
-        layer,
-        tol_upper,
-        tol_lower,
-        tol_mode,
-        text_override,
-    )
+    backend = _backend(ctx)
+    async with _DimstyleFor(backend, dimstyle):
+        result = await backend.dimension_diameter(
+            x1,
+            y1,
+            x2,
+            y2,
+            leader_length,
+            layer,
+            tol_upper,
+            tol_lower,
+            tol_mode,
+            text_override,
+        )
     return _dc(result)
 
 
@@ -2862,7 +2956,7 @@ async def text_find_replace(
     tags={"entity", "modify"},
 )
 async def entity_edit_geometry(
-    handle: Annotated[str, "Handle of an existing CIRCLE, LINE, or ARC"],
+    handle: Annotated[str, "Handle of an existing CIRCLE, LINE, ARC or LWPOLYLINE"],
     cx: Annotated[float | None, "New center X (CIRCLE/ARC)"] = None,
     cy: Annotated[float | None, "New center Y (CIRCLE/ARC)"] = None,
     radius: Annotated[float | None, "New radius (CIRCLE/ARC)"] = None,
@@ -2872,26 +2966,48 @@ async def entity_edit_geometry(
     y2: Annotated[float | None, "New end Y (LINE)"] = None,
     start_angle: Annotated[float | None, "New start angle in degrees (ARC)"] = None,
     end_angle: Annotated[float | None, "New end angle in degrees (ARC)"] = None,
+    vertices: Annotated[
+        list[list[float]] | None,
+        Field(default=None, description="LWPOLYLINE: every vertex anew, [[x, y], ...]."),
+    ] = None,
+    vertex_index: Annotated[
+        int | None,
+        Field(default=None, description="LWPOLYLINE: the vertex to move; -1 is the last."),
+    ] = None,
+    vx: Annotated[float | None, "New X of vertex_index (LWPOLYLINE)"] = None,
+    vy: Annotated[float | None, "New Y of vertex_index (LWPOLYLINE)"] = None,
+    closed: Annotated[bool | None, "Set the LWPOLYLINE closed flag"] = None,
     ctx: Context = None,
 ) -> dict:
     """Edit the defining geometry of an existing entity in place (no delete/recreate).
 
-    CIRCLE: cx/cy/radius · LINE: x1/y1/x2/y2 · ARC: cx/cy/radius/start_angle/end_angle.
-    Any argument left out is unchanged; the handle is preserved.
+    CIRCLE: cx/cy/radius · LINE: x1/y1/x2/y2 · ARC: cx/cy/radius/start_angle/end_angle ·
+    LWPOLYLINE (v1.7): `vertices` (all), or `vertex_index` + `vx`/`vy` (one; -1 is
+    the last - extending an axis means moving its end vertex), and `closed`.
+    Bulges survive when the vertex count is unchanged. Any argument left out is
+    unchanged; the handle is preserved.
     """
     await ctx.debug(f"Editing geometry of entity {handle}")
-    result = await _backend(ctx).entity_edit_geometry(
-        handle,
-        cx,
-        cy,
-        radius,
-        x1,
-        y1,
-        x2,
-        y2,
-        start_angle,
-        end_angle,
-    )
+    try:
+        result = await _backend(ctx).entity_edit_geometry(
+            handle,
+            cx,
+            cy,
+            radius,
+            x1,
+            y1,
+            x2,
+            y2,
+            start_angle,
+            end_angle,
+            vertices=vertices,
+            vertex_index=vertex_index,
+            vx=vx,
+            vy=vy,
+            closed=closed,
+        )
+    except ValueError as exc:
+        raise ToolError(f"entity_edit_geometry: {exc}") from exc
     return _dc(result)
 
 
@@ -5775,6 +5891,11 @@ async def system_run_command(
     accepts hundreds of commands and any loaded ARX/LISP adds more. Prefer the
     typed tools (entity_delete, drawing_save_as, block_insert, drawing_purge):
     they validate their arguments, which a free-text command string cannot.
+
+    One command per call (v1.7 note): a long scripted dialog - a -PLOT
+    with a dozen answers - stalls until COM_CALL_TIMEOUT and writes nothing
+    (measured by the autocad-spds skill). Use the typed tool where one exists
+    (drawing_export_pdf, batch_plot, dimstyle_*).
     """
     sanitize_command(command)
     await ctx.warning(f"Running command: {command}")
@@ -6872,16 +6993,37 @@ async def viewport_create(
         float,
         Field(gt=0, description="Paper:model scale (1.0 = 1:1, 0.5 = 1:2, 2.0 = 2:1)."),
     ] = 1.0,
+    remove_others: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Delete every other viewport on the layout (e.g. the one AutoCAD "
+            "made by itself); their handles come back in `removed`.",
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict:
     """Place a scaled model-space viewport on a paper-space layout.
 
     The viewport window shows the model region centered at
     (view_center_x, view_center_y); view height = height / scale.
+
+    Live, a layout opened for the first time no longer gets AutoCAD's own
+    viewport on top of this one: `layout_create`, `layout_set_current` and this
+    tool hold LAYOUTCREATEVIEWPORT at 0 while they switch (v1.7). For a sheet
+    that already has unwanted viewports, `remove_others=True` clears them.
     """
     await ctx.info(f"Creating viewport on {layout} at {scale}:1")
     return await _backend(ctx).viewport_create(
-        layout, center_x, center_y, width, height, view_center_x, view_center_y, scale
+        layout,
+        center_x,
+        center_y,
+        width,
+        height,
+        view_center_x,
+        view_center_y,
+        scale,
+        remove_others=remove_others,
     )
 
 
@@ -11607,7 +11749,7 @@ async def drawing_checkpoint(
     name: Annotated[str, Field(default="default", min_length=1, max_length=64)] = "default",
     ctx: Context = None,
 ) -> dict:
-    """Take a snapshot of the current document and keep it in the server's
+    """Snapshot the open document and keep it in the server's
     memory under `name` (16 at most; the oldest goes). Nothing is written to
     the drawing and nothing survives a server restart. `drawing_new` and
     `drawing_open` drop every checkpoint.

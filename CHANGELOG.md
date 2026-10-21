@@ -101,6 +101,41 @@ the default surface is ≈ 59,000 tokens, the bundled `spds` profile is
 
 ### Fixed
 
+Stage 5 fixes the gaps that the `autocad-spds` skill worked around, each of which
+cost a client extra calls:
+
+- **`system_run_lisp` returned "nil" for every value on a live seat.**
+  `SendCommand` only queues the form, and AutoCAD evaluates it after the COM
+  call returns. The server read `USERS1` before the form had run.
+  `USERS1` now holds a sentinel first and is polled until the form overwrites it
+  (20 s). An AutoLISP error is caught by `vl-catch-all-apply` and returned as
+  `{ok: false, error}`. A form that never ran is reported as `pending`, never
+  as `nil`.
+- **`entity_create_text`** takes `style` (refused by name with the list when it
+  does not exist), `align` (AutoCAD's TEXT justifications `L C R M TL … BR`, with
+  `(x, y)` as the alignment point) and `width_factor`.
+- **Every `dimension_*`** takes `dimstyle`. Both engines dimension with the
+  current saved style, so the server switches to the named style for the call
+  and switches back. A style that does not exist is refused before anything is
+  drawn.
+- **Viewports.** Live, `layout_create`, `layout_set_current` and
+  `viewport_create` hold `LAYOUTCREATEVIEWPORT` at 0 while they switch, so a
+  layout opened for the first time no longer gets AutoCAD's own viewport on top
+  of the requested one. `viewport_create(remove_others=True)` deletes any other
+  viewport on the sheet and reports their handles.
+- **`entity_edit_geometry`** edits an LWPOLYLINE in place: `vertices`, or
+  `vertex_index` (negative counts from the end) with `vx` / `vy`, and `closed`.
+  Bulges survive when the vertex count is unchanged, a mirrored polyline is
+  edited in WCS, and arguments for other types are refused.
+- **`drawing_close` / `document_close`.** AutoCAD can answer `Close` with "call
+  was rejected" and close the document anyway. The document list now decides:
+  if the document is gone, the close succeeded (`close_call_rejected_but_closed`).
+- **A missing folder inside an `ALLOWED_PATHS` root is created** on write. A
+  client has no tool to make one. Outside a configured root the refusal
+  stands.
+- `system_run_command`'s docstring says "one command per call": a scripted
+  `-PLOT` dialog stalls until the timeout.
+
 - **Headless screenshots were nearly blank.** Lines at the default lineweight
   rendered thinner than a pixel, at about 5 % contrast on the dark model-space
   background. Renders are now drawn on a white sheet (ACI 7 resolves to black)

@@ -132,10 +132,25 @@ def validate_path(path: str, *, allow_write: bool = False) -> Path:
     if allow_write:
         parent = resolved.parent
         if not parent.exists():
-            raise ToolError(
-                f"Parent directory does not exist: '{parent}'. "
-                "Create the directory first or use a valid path."
+            # v1.7: inside a configured ALLOWED_PATHS root the server creates the
+            # missing folders itself - a client has no tool to make a directory,
+            # so the refusal only ever sent a person to do it by hand. Outside a
+            # configured root (or with none configured) it still refuses.
+            root = next(
+                (
+                    a
+                    for a in config.settings.allowed_paths
+                    if parent.is_relative_to(a) and a.is_dir()
+                ),
+                None,
             )
+            if root is None:
+                raise ToolError(
+                    f"Parent directory does not exist: '{parent}'. "
+                    "Create the directory first or use a valid path."
+                )
+            parent.mkdir(parents=True, exist_ok=True)
+            log.info("Created %s inside allowed root %s", parent, root)
 
     return resolved
 

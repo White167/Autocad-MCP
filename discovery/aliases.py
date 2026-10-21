@@ -2768,7 +2768,7 @@ _RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "drawing_open": ((), ("открыть чертеж", "открыть файл")),
     "drawing_save": ((), ("сохранить чертеж", "сохранить")),
     "drawing_save_as": ((), ("сохранить как",)),
-    "drawing_export_pdf": ((), ("в pdf", "печать в pdf", "экспорт pdf")),
+    "drawing_export_pdf": ((), ("в pdf", "сохранить в pdf", "печать в pdf", "экспорт pdf")),
     "drawing_info": ((), ("сведения о чертеже", "информация о чертеже")),
     "drawing_undo": ((), ("отменить", "отмена")),
     "drawing_purge": ((), ("очистить чертеж",)),

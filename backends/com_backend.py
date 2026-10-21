@@ -7,6 +7,7 @@ AutoCAD's STA (Single-Threaded Apartment) COM requirement.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 import math
@@ -1633,6 +1634,99 @@ def _capture_window(hwnd: int) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _no_auto_viewport(doc):
+    """LAYOUTCREATEVIEWPORT = 0 for the duration (v1.7).
+
+    AutoCAD gives a never-opened layout a viewport of its own on its first
+    activation (LAYOUTCREATEVIEWPORT = 1, the default). That viewport sat over
+    the one viewport_create placed and showed the model extents instead - the
+    trap the autocad-spds skill documents. The variable only affects a layout
+    being initialised, so switching to an existing sheet is unchanged; the
+    operator's value is restored afterwards.
+    """
+    old = None
+    try:
+        old = doc.GetVariable("LAYOUTCREATEVIEWPORT")
+        doc.SetVariable("LAYOUTCREATEVIEWPORT", 0)
+    except Exception as exc:  # a CAD without the variable: nothing to suppress
+        log.debug("LAYOUTCREATEVIEWPORT unavailable: %s", exc)
+        old = None
+    try:
+        yield
+    finally:
+        if old is not None:
+            try:
+                doc.SetVariable("LAYOUTCREATEVIEWPORT", old)
+            except Exception as exc:
+                log.debug("LAYOUTCREATEVIEWPORT restore failed: %s", exc)
+
+
+def _delete_other_viewports(doc, keep_handle: str) -> list[str]:
+    """Delete every viewport in the active paper space but ``keep_handle``.
+
+    The layout's own paper-space viewport (``Number`` 1, the sheet itself) is
+    never deleted: AutoCAD refuses it, and it is not a model window.
+    """
+    removed: list[str] = []
+    space = doc.PaperSpace
+    for index in range(int(space.Count) - 1, -1, -1):
+        entity = space.Item(index)
+        if str(getattr(entity, "ObjectName", "")) != "AcDbViewport":
+            continue
+        handle = str(entity.Handle)
+        if handle == keep_handle:
+            continue
+        try:
+            if int(entity.Number) == 1:
+                continue
+        except Exception:
+            pass
+        entity.Delete()
+        removed.append(handle)
+    return removed
+
+
+#: ActiveX AcAlignment for each TEXT justification code
+#: (backends/contracts/entity_creation.TEXT_ALIGN_CODES).
+_ACTIVEX_TEXT_ALIGNMENT = {
+    "L": 0,
+    "C": 1,
+    "R": 2,
+    "M": 4,
+    "TL": 6,
+    "TC": 7,
+    "TR": 8,
+    "ML": 9,
+    "MC": 10,
+    "MR": 11,
+    "BL": 12,
+    "BC": 13,
+    "BR": 14,
+}
+
+#: How long system_run_lisp waits for AutoCAD to evaluate a queued form.
+LISP_RESULT_TIMEOUT_S = 20.0
+_LISP_ERROR_MARK = "__acadmcp_error__:"
+
+
+def _await_lisp_result(doc, sentinel: str, timeout_s: float, poll_s: float = 0.05):
+    """Poll USERS1 until it no longer holds ``sentinel``. Returns (value, pending)."""
+    deadline = time.monotonic() + float(timeout_s)
+    while True:
+        try:
+            value = doc.GetVariable("USERS1")
+        except Exception as exc:  # a busy document answers on the next poll
+            log.debug("USERS1 read failed while waiting: %s", exc)
+            value = sentinel
+        value = "" if value is None else str(value)
+        if value != sentinel:
+            return value, False
+        if time.monotonic() > deadline:
+            return None, True
+        time.sleep(poll_s)
+
+
 class ComBackend(AutoCADBackend):
     """Live AutoCAD control via COM API."""
 
@@ -2289,7 +2383,8 @@ class ComBackend(AutoCADBackend):
             existing = {doc.Layouts.Item(i).Name for i in range(doc.Layouts.Count)}
             if name in existing:
                 return {"ok": False, "error": f"Layout already exists: {name}"}
-            doc.Layouts.Add(name)
+            with _no_auto_viewport(doc):
+                doc.Layouts.Add(name)
             return {"ok": True, "layout": name}
 
         return await self._run(_sync)
@@ -2298,7 +2393,8 @@ class ComBackend(AutoCADBackend):
         def _sync():
             doc = _acad_doc()
             try:
-                doc.ActiveLayout = doc.Layouts.Item(name)
+                with _no_auto_viewport(doc):
+                    doc.ActiveLayout = doc.Layouts.Item(name)
             except Exception:
                 return {"ok": False, "error": f"Layout not found: {name}"}
             return {"ok": True, "current": name}
@@ -2447,6 +2543,7 @@ class ComBackend(AutoCADBackend):
         view_center_x: float,
         view_center_y: float,
         scale: float = 1.0,
+        remove_others: bool = False,
     ) -> dict:
         def _sync():
             if scale <= 0:
@@ -2460,7 +2557,8 @@ class ComBackend(AutoCADBackend):
                 return {"ok": False, "error": f"Paper-space layout not found: {layout}"}
             previous = doc.ActiveLayout.Name
             if previous != layout:
-                doc.ActiveLayout = target
+                with _no_auto_viewport(doc):
+                    doc.ActiveLayout = target
             try:
                 viewport = doc.PaperSpace.AddPViewport(
                     _apoint(center_x, center_y), float(width), float(height)
@@ -2477,13 +2575,16 @@ class ComBackend(AutoCADBackend):
                 # and every COM viewport looked at the model origin instead of
                 # where the caller asked. The failure is reported now.
                 viewport.Target = _apoint(view_center_x, view_center_y)
-                return {
+                out = {
                     "ok": True,
                     "handle": viewport.Handle,
                     "layout": layout,
                     "scale": scale,
                     "view_height": float(height) / float(scale),
                 }
+                if remove_others:
+                    out["removed"] = _delete_other_viewports(doc, str(viewport.Handle))
+                return out
             finally:
                 if previous != layout:
                     doc.ActiveLayout = doc.Layouts.Item(previous)
@@ -2592,7 +2693,27 @@ class ComBackend(AutoCADBackend):
                     )
             # A clean or untitled document is never asked to save: Close(True)
             # on a clean file is a no-op write, on an untitled one a dialog.
-            doc.Close(bool(save and dirty and path))
+            rejected = False
+            try:
+                doc.Close(bool(save and dirty and path))
+            except _COM_ERROR as exc:
+                # v1.7: AutoCAD can answer the Close itself with "call was
+                # rejected" (RPC_E_CALL_REJECTED) and close the document anyway
+                # - the autocad-spds skill saw an error for a closed drawing.
+                # Ask the document list, which changes nothing, before deciding.
+                hr = exc.args[0] if exc.args else 0
+                if hr != _RPC_E_CALL_REJECTED:
+                    raise
+
+                def _still_open():
+                    for other in self._com_documents(app):
+                        if (str(other.Name), str(other.FullName) or None) == (name, path):
+                            return True
+                    return False
+
+                if self._wait_out_rejected_call(_still_open):
+                    raise
+                rejected = True
 
             def _read_after_close():
                 # AutoCAD still rejects calls for a moment after Close
@@ -2610,6 +2731,7 @@ class ComBackend(AutoCADBackend):
                 "active": active,
                 "open_documents": count,
                 "backend": "com",
+                **({"close_call_rejected_but_closed": True} if rejected else {}),
             }
 
         result = await self._run(_sync)
@@ -4760,11 +4882,36 @@ class ComBackend(AutoCADBackend):
         rotation=0.0,
         layer=None,
         color=None,
+        style=None,
+        align=None,
+        width_factor=None,
     ) -> EntityInfo:
+        from .contracts.entity_creation import text_align_code
+
+        code = text_align_code(align)
+
         def _sync():
+            doc = _acad_doc()
+            style_name = None
+            if style is not None:
+                names = [str(doc.TextStyles.Item(i).Name) for i in range(doc.TextStyles.Count)]
+                style_name = next((n for n in names if n.lower() == str(style).lower()), None)
+                if style_name is None:
+                    raise ValueError(
+                        f"text style {style!r} does not exist; styles: {', '.join(sorted(names))}"
+                    )
             mspace = _msp()
             txt = mspace.AddText(text, _apoint(x, y), float(height))
             txt.Rotation = deg2rad(rotation)
+            if style_name is not None:
+                txt.StyleName = style_name
+            if width_factor is not None:
+                txt.ScaleFactor = float(width_factor)
+            if code is not None and code != "L":
+                # ActiveX: a justified TEXT is placed by TextAlignmentPoint, set
+                # after Alignment (InsertionPoint is then recomputed by AutoCAD).
+                txt.Alignment = _ACTIVEX_TEXT_ALIGNMENT[code]
+                txt.TextAlignmentPoint = _apoint(x, y)
             _apply_entity_attrs(txt, layer, color, None)
             _regen()
             return _entity_info(txt)
@@ -5416,11 +5563,71 @@ class ComBackend(AutoCADBackend):
         y2=None,
         start_angle=None,
         end_angle=None,
+        vertices=None,
+        vertex_index=None,
+        vx=None,
+        vy=None,
+        closed=None,
     ) -> EntityInfo:
+        from .contracts.entity_query import edited_polyline_vertices
+
         def _sync():
             doc = _acad_doc()
             ent = doc.HandleToObject(handle)
             name = ent.ObjectName.replace("AcDb", "").upper()
+            if name in ("POLYLINE", "LWPOLYLINE") and str(ent.ObjectName) == "AcDbPolyline":
+                foreign = [
+                    k
+                    for k, v in (
+                        ("cx", cx),
+                        ("cy", cy),
+                        ("radius", radius),
+                        ("x1", x1),
+                        ("y1", y1),
+                        ("x2", x2),
+                        ("y2", y2),
+                        ("start_angle", start_angle),
+                        ("end_angle", end_angle),
+                    )
+                    if v is not None
+                ]
+                if foreign:
+                    raise RuntimeError(
+                        f"entity_edit_geometry: {', '.join(foreign)} do not apply to an "
+                        "LWPOLYLINE; use vertices, vertex_index + vx/vy, or closed."
+                    )
+                # AcDbPolyline is the LWPOLYLINE. Its Coordinates are OCS x, y
+                # pairs; a polyline in a plane other than WCS XY is refused,
+                # the same boundary as the headless engine.
+                normal = tuple(float(v) for v in ent.Normal)
+                if abs(normal[0]) > 1e-9 or abs(normal[1]) > 1e-9:
+                    raise UnsupportedCapabilityError(
+                        "ocs_tilted_plane",
+                        f"entity_edit_geometry: polyline {handle} lies in a plane tilted out "
+                        "of WCS XY. Use entity_move, or edit it in AutoCAD.",
+                    )
+                flat = [float(v) for v in ent.Coordinates]
+                mirror = normal[2] < 0  # extrusion (0,0,-1): OCS x = -WCS x
+                current = [
+                    ((-flat[k] if mirror else flat[k]), flat[k + 1]) for k in range(0, len(flat), 2)
+                ]
+                new = edited_polyline_vertices(current, vertices, vertex_index, vx, vy)
+                if new is not None:
+                    bulges = [float(ent.GetBulge(k)) for k in range(len(current))]
+                    ent.Coordinates = _av([v for (x, y) in new for v in ((-x if mirror else x), y)])
+                    if len(new) == len(current):
+                        for k, bulge in enumerate(bulges):
+                            if bulge:
+                                ent.SetBulge(k, bulge)
+                if closed is not None:
+                    ent.Closed = bool(closed)
+                _regen()
+                return _entity_info(ent)
+            if vertices is not None or vertex_index is not None or closed is not None:
+                raise RuntimeError(
+                    f"entity_edit_geometry: vertices / vertex_index / closed edit an "
+                    f"LWPOLYLINE, not a {name}."
+                )
             if name == "CIRCLE":
                 c = ent.Center
                 ent.Center = _apoint(
@@ -5453,7 +5660,8 @@ class ComBackend(AutoCADBackend):
                     ent.EndAngle = deg2rad(float(end_angle))
             else:
                 raise RuntimeError(
-                    f"entity_edit_geometry: {name} not supported (use CIRCLE, LINE, or ARC)."
+                    f"entity_edit_geometry: {name} not supported (use CIRCLE, LINE, ARC or "
+                    "LWPOLYLINE)."
                 )
             _regen()
             return _entity_info(ent)
@@ -7049,19 +7257,50 @@ class ComBackend(AutoCADBackend):
                     "Press ESC in AutoCAD and retry."
                 )
             # N6: SendCommand is void-returning, so the value can't be read from its
-            # return. Stash it in USERS1 and read it back after the form completes
-            # (CMDACTIVE-polled by _safe_send_command).
-            wrapped = f'(vl-load-com)(setvar "USERS1" (vl-princ-to-string (progn {expression})))'
+            # return; it is stashed in USERS1. v1.7: SendCommand is also
+            # *queued* - AutoCAD evaluates the form once it is idle, after this
+            # call returned - so CMDACTIVE can read 0 before the form even
+            # started and USERS1 was read stale (the autocad-spds skill saw
+            # every result as "nil" / "OK"). USERS1 now carries a sentinel
+            # first and is polled until the form overwrites it. An error inside
+            # the form is caught by vl-catch-all-apply and comes back as text
+            # rather than leaving the sentinel to time out.
+            sentinel = f"__acadmcp_pending_{uuid.uuid4().hex[:12]}"
+            doc.SetVariable("USERS1", sentinel)
+            wrapped = (
+                "(vl-load-com)"
+                "(setq acadmcp:r (vl-catch-all-apply (function (lambda () "
+                f"{expression}"
+                "))))"
+                '(setvar "USERS1" (if (vl-catch-all-error-p acadmcp:r) '
+                f'(strcat "{_LISP_ERROR_MARK}" (vl-catch-all-error-message acadmcp:r)) '
+                "(vl-princ-to-string acadmcp:r)))"
+                "(setq acadmcp:r nil)(princ)"
+            )
             self._safe_send_command(doc, wrapped)
-            try:
-                result = doc.GetVariable("USERS1")
-            except Exception as exc:  # optional read: the expression already ran
-                log.debug("doc.GetVariable(USERS1) failed, reporting nil: %s", exc)
-                result = None
+            result, pending = _await_lisp_result(doc, sentinel, LISP_RESULT_TIMEOUT_S)
+            if pending:
+                return {
+                    "ok": True,
+                    "expression": expression,
+                    "result": None,
+                    "pending": True,
+                    "message": (
+                        f"AutoCAD had not evaluated the expression after "
+                        f"{LISP_RESULT_TIMEOUT_S:g}s; it may still run. Check with "
+                        "system_status before sending it again."
+                    ),
+                }
+            if result.startswith(_LISP_ERROR_MARK):
+                return {
+                    "ok": False,
+                    "expression": expression,
+                    "error": result[len(_LISP_ERROR_MARK) :] or "AutoLISP error",
+                }
             return {
                 "ok": True,
                 "expression": expression,
-                "result": str(result) if result not in (None, "") else "nil",
+                "result": result if result != "" else "nil",
             }
 
         return await self._run(_sync)

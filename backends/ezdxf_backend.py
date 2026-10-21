@@ -2964,6 +2964,7 @@ class EzdxfBackend(AutoCADBackend):
         view_center_x: float,
         view_center_y: float,
         scale: float = 1.0,
+        remove_others: bool = False,
     ) -> dict:
         def _sync():
             doc = self._require_doc()
@@ -2979,14 +2980,27 @@ class EzdxfBackend(AutoCADBackend):
                 view_center_point=(view_center_x, view_center_y),
                 view_height=view_height,
             )
+            removed: list[str] = []
+            if remove_others:
+                main = target.main_viewport()
+                main_handle = main.dxf.handle if main is not None else None
+                for other in list(target.query("VIEWPORT")):
+                    handle = other.dxf.handle
+                    if handle in (viewport.dxf.handle, main_handle) or other.dxf.get("id") == 1:
+                        continue
+                    target.delete_entity(other)
+                    removed.append(handle)
             self._mark_dirty()
-            return {
+            out = {
                 "ok": True,
                 "handle": viewport.dxf.handle,
                 "layout": layout,
                 "scale": scale,
                 "view_height": view_height,
             }
+            if remove_others:
+                out["removed"] = removed
+            return out
 
         return await self._async(_sync)
 
@@ -4767,18 +4781,45 @@ class EzdxfBackend(AutoCADBackend):
         rotation=0.0,
         layer=None,
         color=None,
+        style=None,
+        align=None,
+        width_factor=None,
     ) -> EntityInfo:
+        from .contracts.entity_creation import TEXT_ALIGN_CODES, text_align_code
+
+        code = text_align_code(align)
+
         def _sync():
+            doc = self._require_doc()
             msp = self._msp()
-            ent = msp.add_text(
-                text,
-                dxfattribs={
-                    "style": _current_textstyle_name(self._require_doc()),
-                    "height": float(height),
-                    "rotation": float(rotation),
-                    "insert": (float(x), float(y)),
-                },
-            )
+            style_name = _current_textstyle_name(doc)
+            if style is not None:
+                # ezdxf would store any name; AutoCAD refuses a missing one, so
+                # the headless engine refuses it too, with the styles it has.
+                found = next(
+                    (st.dxf.name for st in doc.styles if st.dxf.name.lower() == str(style).lower()),
+                    None,
+                )
+                if found is None:
+                    raise ValueError(
+                        f"text style {style!r} does not exist; styles: "
+                        f"{', '.join(sorted(st.dxf.name for st in doc.styles))}"
+                    )
+                style_name = found
+            attribs = {
+                "style": style_name,
+                "height": float(height),
+                "rotation": float(rotation),
+                "insert": (float(x), float(y)),
+            }
+            if width_factor is not None:
+                attribs["width"] = float(width_factor)
+            if code is not None:
+                halign, valign = TEXT_ALIGN_CODES[code]
+                attribs["halign"] = halign
+                attribs["valign"] = valign
+                attribs["align_point"] = (float(x), float(y))
+            ent = msp.add_text(text, dxfattribs=attribs)
             self._apply_attrs(ent, layer, color)
             self._mark_dirty()
             return _entity_info_dxf(ent)
@@ -6074,10 +6115,67 @@ class EzdxfBackend(AutoCADBackend):
         y2=None,
         start_angle=None,
         end_angle=None,
+        vertices=None,
+        vertex_index=None,
+        vx=None,
+        vy=None,
+        closed=None,
     ) -> EntityInfo:
+        from .contracts.entity_query import edited_polyline_vertices
+
         def _sync():
             ent = self._get_entity(handle)
             et = ent.dxftype()
+            if et == "LWPOLYLINE":
+                foreign = [
+                    k
+                    for k, v in (
+                        ("cx", cx),
+                        ("cy", cy),
+                        ("radius", radius),
+                        ("x1", x1),
+                        ("y1", y1),
+                        ("x2", x2),
+                        ("y2", y2),
+                        ("start_angle", start_angle),
+                        ("end_angle", end_angle),
+                    )
+                    if v is not None
+                ]
+                if foreign:
+                    raise RuntimeError(
+                        f"entity_edit_geometry: {', '.join(foreign)} do not apply to an "
+                        "LWPOLYLINE; use vertices, vertex_index + vx/vy, or closed."
+                    )
+                extrusion = tuple(ent.dxf.get("extrusion", _IDENTITY_EXTRUSION))
+                if not ocs.is_flat_frame(extrusion):
+                    raise UnsupportedCapabilityError(
+                        "ocs_tilted_plane",
+                        f"entity_edit_geometry: polyline {handle} lies in a plane tilted out "
+                        "of WCS XY; a 2D vertex does not determine a point in it. Use "
+                        "entity_move, or edit it in AutoCAD.",
+                    )
+                elevation = float(ent.dxf.get("elevation", 0.0))
+                rows = list(ent.get_points("xyseb"))
+                current = [tuple(ocs.to_wcs_2d(extrusion, r[0], r[1], elevation)) for r in rows]
+                new = edited_polyline_vertices(current, vertices, vertex_index, vx, vy)
+                if new is not None:
+                    keep_bulges = len(new) == len(rows)
+                    points = []
+                    for k, (wx, wy) in enumerate(new):
+                        ox, oy, _oz = ocs.from_wcs(extrusion, wx, wy, elevation)
+                        bulge = rows[k][4] if keep_bulges else 0.0
+                        points.append((ox, oy, 0.0, 0.0, bulge))
+                    ent.set_points(points, format="xyseb")
+                if closed is not None:
+                    ent.closed = bool(closed)
+                self._mark_dirty()
+                return _entity_info_dxf(ent)
+            if vertices is not None or vertex_index is not None or closed is not None:
+                raise RuntimeError(
+                    f"entity_edit_geometry: vertices / vertex_index / closed edit an "
+                    f"LWPOLYLINE, not a {et}."
+                )
             # cx/cy arrive in WCS, because that is what entity_get reports. For a
             # mirrored entity the stored attribute is not WCS, so the value has to
             # be mapped back into the entity's own frame before it is written.
@@ -6141,7 +6239,8 @@ class EzdxfBackend(AutoCADBackend):
                     ent.dxf.end_angle = float(end_angle)
             else:
                 raise RuntimeError(
-                    f"entity_edit_geometry: {et} not supported (use CIRCLE, LINE, or ARC)."
+                    f"entity_edit_geometry: {et} not supported (use CIRCLE, LINE, ARC or "
+                    "LWPOLYLINE)."
                 )
             self._mark_dirty()
             return _entity_info_dxf(ent)
