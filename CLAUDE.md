@@ -143,7 +143,7 @@ Tools are organized into sections (counts are indicative — `system_about` is a
   `capability: "ocs_tilted_plane"` — use `entity_move` instead.
 - **ACI colors**: 1–255 for specific colors, 256=ByLayer, 0=ByBlock.
 - **COM backend only**: `system_run_command`, `system_run_lisp`, and `view_zoom_extents/window` (view ops are no-ops in ezdxf).
-- **Screenshot**: COM uses Win32 window capture (Pillow required); ezdxf renders via matplotlib.
+- **Screenshot**: billed by pixels, so default 800 px and frame with `window` (drawing units). `backends/render.py` renders offscreen on a white sheet (ezdxf in memory; COM from a `Document.Export` snapshot — the operator's view never moves) and post-processes width / gray / mono / JPEG. A plain live screenshot without window/layers/space/labels is still a Win32 window capture (Pillow required).
 - **`_dc(obj)`**: converts dataclasses to dicts recursively for JSON serialization.
 - **Engineering layer scaffold**: `drawing_new` auto-bootstraps standard linetypes (CENTER, HIDDEN, PHANTOM) and engineering layers (GEOMETRY, DIM, CENTER, HIDDEN, PHANTOM, HATCH, TEXT, TITLEBLOCK). Pass `bootstrap=False` to opt out.
 - **Generic contracts added in 1.6:** `block_define(name, entities, attdefs)` (typed primitives + ATTDEFs, both engines; `overwrite` replaces contents so INSERTs keep the name) and `entity_get/set_xdata` (typed by group code; 255-char strings, 16 KB per entity, enforced before writing).

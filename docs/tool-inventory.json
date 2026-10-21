@@ -3374,7 +3374,7 @@
       "name": "view_screenshot",
       "group": "view",
       "cost": "read",
-      "summary": "Capture a PNG picture of the drawing as it currently looks.",
+      "summary": "Look at the drawing: an image, optionally framed to a window, small and mono.",
       "tags": [
         "screenshot",
         "view"

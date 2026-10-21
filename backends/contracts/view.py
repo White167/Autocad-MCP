@@ -41,3 +41,25 @@ class ViewContract(ABC):
         read as the whole sheet.
         """
         ...
+
+    @abstractmethod
+    async def view_render(
+        self,
+        *,
+        window: tuple[float, float, float, float] | None = None,
+        layers: list[str] | None = None,
+        space: str | None = None,
+        mode: str = "color",
+        width: int = 800,
+        overlay_handles: bool = False,
+        max_labels: int = 40,
+    ) -> dict:
+        """An offscreen render of the document, framed to ``window`` (v1.7).
+
+        Never a window capture and never a change of the operator's view: the
+        headless engine renders its in-memory document, the live engine renders
+        a ``Document.Export`` DXF snapshot of the active one. Returns
+        ``backends.render.render_doc``'s dict (``png``, ``width``, ``height``,
+        the label keys of :meth:`view_screenshot_grounded`).
+        """
+        ...

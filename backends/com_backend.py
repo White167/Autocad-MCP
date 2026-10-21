@@ -1684,7 +1684,10 @@ class ComBackend(AutoCADBackend):
                     reason="typed_edges_become_temporary_line_arc_ellipse;append_inner_loop",
                 ),
                 "handle_overlay": FeatureCapability(
-                    False, reason="window_capture_has_no_render_to_label"
+                    True,
+                    "snapshot_render",
+                    reason="drawn_into_an_offscreen_render_of_a_document_export;"
+                    "never_into_the_live_drawing",
                 ),
                 "measure_area_acis": FeatureCapability(True, "native"),
                 "explode_opaque_members": FeatureCapability(
@@ -6765,23 +6768,62 @@ class ComBackend(AutoCADBackend):
         overlay_handles: bool = True,
         max_labels: int = 40,
     ) -> dict:
-        """Not available live: this backend captures the AutoCAD window itself.
+        """A labelled render of a ``Document.Export`` snapshot (see :meth:`view_render`).
 
-        Grounding needs labels drawn into the render, and there is no render
-        here to draw into — the pixels come from the application's own window.
-        Annotating them would mean writing entities into the user's live drawing
-        and deleting them again, which is a mutation nobody asked for.
+        Until v1.7 this refused: a window capture has no render to draw labels
+        into, and drawing them into the live document would be a mutation nobody
+        asked for. The snapshot render is neither - the labels are ink on an
+        offscreen picture of an exported copy.
         """
-        raise UnsupportedCapabilityError(
-            "handle_overlay",
-            "view_screenshot_grounded: the live backend captures the AutoCAD "
-            "window rather than rendering the drawing, so there is no render to "
-            "label. Annotating the live drawing to produce the overlay would "
-            "mean creating and deleting entities in the user's document. Use "
-            "entity_list for handles alongside the plain screenshot, or switch "
-            "to the headless backend (AUTOCAD_MCP_BACKEND=ezdxf) for a grounded "
-            "render.",
-        )
+        return await self.view_render(overlay_handles=overlay_handles, max_labels=max_labels)
+
+    async def view_render(
+        self,
+        *,
+        window=None,
+        layers=None,
+        space=None,
+        mode: str = "color",
+        width: int = 800,
+        overlay_handles: bool = False,
+        max_labels: int = 40,
+    ) -> dict:
+        """Render a ``Document.Export`` snapshot of the active document offscreen.
+
+        The export is the one ``drawing_understand`` reads (measured on AutoCAD
+        2026: model space, every layout and every block definition, the document
+        keeps its name, an unsaved document exports). Nothing about the
+        operator's view changes - no zoom, no regen - which is why a framed
+        screenshot on the live engine goes through here rather than through
+        ``ZoomWindow`` and a window capture. Handle labels work too: they are
+        drawn into the render, never into the live drawing.
+        """
+        import shutil
+
+        import ezdxf
+
+        from engineering.understand.snapshot import _com_export
+
+        from .render import render_doc
+
+        written, folder, _source = await self._run(_com_export, self, None)
+        try:
+
+            def _render():
+                return render_doc(
+                    ezdxf.readfile(written),
+                    space=space,
+                    window=window,
+                    layers=layers,
+                    mode=mode,
+                    width=width,
+                    overlay_handles=overlay_handles,
+                    max_labels=max_labels,
+                )
+
+            return await asyncio.to_thread(_render)
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
     async def view_screenshot(self, overlay_handles: bool = False) -> bytes | None:
         def _sync():

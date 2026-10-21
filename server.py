@@ -11,13 +11,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import math
 import sys
 import time
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
@@ -5217,7 +5218,120 @@ async def view_zoom_window(
     return await _backend(ctx).view_zoom_window(x1, y1, x2, y2)
 
 
-@cad_tool(summary="Capture a PNG picture of the drawing as it currently looks.", cost="read")
+_ScreenshotMode = Literal["color", "gray", "mono"]
+_ImageFormat = Literal["png", "jpeg"]
+_RenderRoute = Literal["auto", "render", "window"]
+
+
+async def _screenshot(
+    ctx: Context,
+    *,
+    window: list[float] | None,
+    width: int,
+    mode: str,
+    image_format: str,
+    quality: int,
+    layers: list[str] | None,
+    space: str | None,
+    render: str,
+    overlay_handles: bool,
+    zoom: bool,
+):
+    """The shared body of view_screenshot / view_zoom_and_screenshot.
+
+    ``render`` decides where the pixels come from: an offscreen render of the
+    document (``backends/render.py``; on the live engine a ``Document.Export``
+    snapshot, so the operator's view never moves) or the live AutoCAD window.
+    ``auto`` renders headlessly always, and on the live engine whenever the
+    window capture could not honour the request (a window without zoom, a
+    layer filter, a layout, handle labels).
+    """
+    from fastmcp.utilities.types import Image
+
+    from backends.render import postprocess
+
+    b = _backend(ctx)
+    if window is not None and len(window) != 4:
+        raise ToolError("window must be [x1, y1, x2, y2] in drawing units")
+    live = b.name == "com"
+    if render == "auto":
+        needs_render = bool(layers or space or overlay_handles or (window and not zoom))
+        route = "window" if live and not needs_render else "render"
+    else:
+        route = render
+    if route == "window" and not live:
+        route = "render"  # the headless engine has no window to capture
+    if route == "window" and (layers or space or overlay_handles):
+        raise ToolError(
+            "render='window' captures the AutoCAD window as it is: layers, space and "
+            "overlay_handles need render='render' (an offscreen render of the document)."
+        )
+    await ctx.report_progress(10, 100)
+    if route == "render":
+        try:
+            result = await b.view_render(
+                window=tuple(window) if window else None,
+                layers=layers,
+                space=space,
+                mode=mode,
+                width=width,
+                overlay_handles=overlay_handles,
+            )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        png_bytes = result.get("png")
+    else:
+        if zoom:
+            if window is not None:
+                await b.view_zoom_window(*window)
+            else:
+                await b.view_zoom_extents()
+        png_bytes = await b.view_screenshot()
+    await ctx.report_progress(80, 100)
+    if png_bytes is None:
+        raise ToolError(
+            "Screenshot not available. "
+            "For COM backend: ensure AutoCAD window is visible. "
+            "For ezdxf backend: install matplotlib (pip install matplotlib)."
+        )
+    data, info = await asyncio.to_thread(
+        postprocess,
+        png_bytes,
+        width=width,
+        mode=mode,
+        fmt=image_format,
+        quality=quality,
+        # a render is always on a white sheet; a window capture is whatever
+        # AutoCAD's background is, judged from the picture
+        dark_background=False if route == "render" else None,
+    )
+    await ctx.report_progress(100, 100)
+    await ctx.info(
+        f"screenshot {info['width']}x{info['height']} {image_format} via {route} "
+        f"(~{info['image_tokens']} image tokens)"
+    )
+    return Image(data=data, format=image_format)
+
+
+_WINDOW_DOC = (
+    "Frame [x1, y1, x2, y2] in drawing units of the rendered space. Only that "
+    "area is drawn, and the image takes its aspect."
+)
+_WIDTH_DOC = (
+    "Image width in px (200-1568). An image costs about width x height / 750 tokens: "
+    "800 px at 16:9 is ~480, the old 1600 px ~1850."
+)
+_MODE_DOC = "color, gray, or mono (black ink on white: thin lines stay legible small)."
+_RENDER_DOC = (
+    "auto | render (offscreen render of the document; live: a Document.Export snapshot, "
+    "the operator's view never moves) | window (capture the live AutoCAD window)."
+)
+
+
+@cad_tool(
+    summary="Look at the drawing: an image, optionally framed to a window, small and mono.",
+    cost="read",
+)
 @mcp.tool(
     annotations={"title": "Screenshot", "readOnlyHint": True},
     tags={"view", "screenshot"},
@@ -5225,43 +5339,64 @@ async def view_zoom_window(
 async def view_screenshot(
     overlay_handles: Annotated[
         bool,
-        "Label each entity with its handle, so what you see maps to what you "
-        "can modify. Headless backend only.",
+        "Label each entity with its handle, so what you see maps to what you can modify.",
     ] = False,
+    window: Annotated[
+        list[float] | None, Field(default=None, min_length=4, max_length=4, description=_WINDOW_DOC)
+    ] = None,
+    width: Annotated[int, Field(default=800, ge=200, le=1568, description=_WIDTH_DOC)] = 800,
+    mode: Annotated[_ScreenshotMode, Field(default="color", description=_MODE_DOC)] = "color",
+    format: Annotated[
+        _ImageFormat, Field(default="png", description="png or jpeg (smaller transfer).")
+    ] = "png",
+    quality: Annotated[int, Field(default=70, ge=10, le=95, description="JPEG quality.")] = 70,
+    layers: Annotated[
+        list[str] | None,
+        Field(default=None, description="Draw only entities on these layers."),
+    ] = None,
+    space: Annotated[
+        str | None,
+        Field(default=None, description="model (default) or a layout name."),
+    ] = None,
+    render: Annotated[_RenderRoute, Field(default="auto", description=_RENDER_DOC)] = "auto",
     ctx: Context = None,
 ):
-    """Capture a screenshot of the current drawing view.
+    """Capture an image of the drawing.
 
-    COM backend: captures live AutoCAD window at current view.
-    ezdxf backend: renders via matplotlib to PNG.
+    A screenshot is billed by its pixels, not its bytes, so frame it (`window`)
+    and keep it small (`width`, 800 by default since v1.7; 1600 before) - and
+    reach for `drawing_digest`-style reads (entity_list with fields, the
+    analysis_* tools) when a number would answer the question.
+
+    Headless: an offscreen render of the in-memory document on a white sheet.
+    Live: with nothing but the defaults, the AutoCAD window as it stands; with
+    `window`, `layers`, `space` or `overlay_handles`, an offscreen render of a
+    `Document.Export` snapshot of the active document - the operator's view is
+    never zoomed or regenerated. `render` forces either route.
 
     With `overlay_handles`, each entity is labelled with its handle at its own
     centre — every modify tool takes a handle, and without the labels there is
     nothing connecting "the circle at the top-left" to a hex string you can act
     on. Crowded drawings are capped and the image says how many of how many were
-    labelled. Live AutoCAD captures its own window, so there is no render to
-    label there; it refuses with `capability: "handle_overlay"`.
+    labelled; only entities inside `window` are labelled.
 
-    Returns an Image content block with the PNG data.
+    `mode="mono"` thresholds to black on white (a live dark model space is
+    inverted first). Returns an Image content block.
     """
-    from fastmcp.utilities.types import Image
-
     await ctx.info("Capturing drawing screenshot")
-    await ctx.report_progress(0, 100)
-
-    b = _backend(ctx)
-    png_bytes = await b.view_screenshot(overlay_handles=overlay_handles)
-
-    await ctx.report_progress(100, 100)
-
-    if png_bytes is None:
-        raise ToolError(
-            "Screenshot not available. "
-            "For COM backend: ensure AutoCAD window is visible. "
-            "For ezdxf backend: install matplotlib (pip install matplotlib)."
-        )
-
-    return Image(data=png_bytes, format="png")
+    return await _screenshot(
+        ctx,
+        window=window,
+        width=width,
+        mode=mode,
+        image_format=format,
+        quality=quality,
+        layers=layers,
+        space=space,
+        render=render,
+        overlay_handles=overlay_handles,
+        zoom=False,
+    )
 
 
 @cad_tool(
@@ -5277,31 +5412,40 @@ async def view_zoom_and_screenshot(
     y1: Annotated[float | None, "Optional: zoom to window corner Y1"] = None,
     x2: Annotated[float | None, "Optional: zoom to window corner X2"] = None,
     y2: Annotated[float | None, "Optional: zoom to window corner Y2"] = None,
+    width: Annotated[int, Field(default=800, ge=200, le=1568, description=_WIDTH_DOC)] = 800,
+    mode: Annotated[_ScreenshotMode, Field(default="color", description=_MODE_DOC)] = "color",
+    format: Annotated[
+        _ImageFormat, Field(default="png", description="png or jpeg (smaller transfer).")
+    ] = "png",
+    quality: Annotated[int, Field(default=70, ge=10, le=95, description="JPEG quality.")] = 70,
+    render: Annotated[_RenderRoute, Field(default="auto", description=_RENDER_DOC)] = "auto",
     ctx: Context = None,
 ):
     """Zoom to extents (or window if coordinates given), then capture a screenshot.
 
-    The most useful tool for visually inspecting drawing state.
+    The most useful tool for visually inspecting drawing state. Live, the
+    AutoCAD view really is zoomed (that is the point of this tool; use
+    `view_screenshot(window=...)` to frame a picture without moving the view).
+    Headless there is no view: the window frames the render. `width`, `mode`,
+    `format` and `quality` are `view_screenshot`'s.
     """
-    from fastmcp.utilities.types import Image
-
     await ctx.info("Zooming and capturing screenshot")
-    b = _backend(ctx)
-
-    await ctx.report_progress(10, 100)
-    if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
-        await b.view_zoom_window(x1, y1, x2, y2)
-    else:
-        await b.view_zoom_extents()
-
-    await ctx.report_progress(50, 100)
-    png_bytes = await b.view_screenshot()
-    await ctx.report_progress(100, 100)
-
-    if png_bytes is None:
-        raise ToolError("Screenshot unavailable. Check backend capabilities.")
-
-    return Image(data=png_bytes, format="png")
+    corners = (x1, y1, x2, y2)
+    if any(c is not None for c in corners) and not all(c is not None for c in corners):
+        raise ToolError("give all four of x1, y1, x2, y2, or none of them")
+    return await _screenshot(
+        ctx,
+        window=list(corners) if x1 is not None else None,
+        width=width,
+        mode=mode,
+        image_format=format,
+        quality=quality,
+        layers=None,
+        space=None,
+        render=render,
+        overlay_handles=False,
+        zoom=True,
+    )
 
 
 # ---------------------------------------------------------------------------

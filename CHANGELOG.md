@@ -41,6 +41,22 @@ the default surface is ≈ 57,400 tokens, the bundled `spds` profile is
   The pinned tools stay listed (by default the lean set); the rest of the
   enabled surface is reached through `search_tools` / `call_tool`. A tool the
   profile disables is neither listed nor found.
+- **Cheap screenshots** (stage 3, `backends/render.py`). Images are billed by
+  pixels (≈ width × height / 750 tokens), so `view_screenshot` now defaults to
+  **800 px** instead of 1600 (≈ 600 tokens on an A3 sheet, down from ≈ 1 850).
+  It takes `window=[x1, y1, x2, y2]` in drawing units (the image takes the
+  window's aspect, so no pixel goes to a margin), `width` (200-1568), `mode`
+  (`color` / `gray` / `mono`), `format` (`png` / `jpeg`, `quality`), `layers`,
+  `space` (a layout) and `render` (`auto` / `render` / `window`).
+  `view_zoom_and_screenshot` gains the same width, mode, format and render
+  options.
+- **`view_render`** contract, on both engines: an offscreen render that is
+  never a window capture and never changes the operator's view. Headless, it
+  renders the in-memory document. Live, it renders a `Document.Export`
+  snapshot, the route `drawing_understand` already measured on AutoCAD 2026.
+  On the live engine, a screenshot with a window, layers, a layout or handle
+  labels goes through it, so the AutoCAD view never moves. Not yet executed
+  live.
 - Russian search vocabulary for about 80 drafting tools.
 - `benchmarks/token_suite.py` idle lane: rows for the short listing and the
   three presets.
@@ -53,6 +69,16 @@ the default surface is ≈ 57,400 tokens, the bundled `spds` profile is
 - 248 registered tools (`tool_help`); lean is 66.
 
 ### Fixed
+
+- **Headless screenshots were nearly blank.** Lines at the default lineweight
+  rendered thinner than a pixel, at about 5 % contrast on the dark model-space
+  background. Renders are now drawn on a white sheet (ACI 7 resolves to black)
+  with every line at least one solid pixel.
+- `view_zoom_and_screenshot(x1, y1, x2, y2)` ignored the window on the
+  headless engine and returned the extents. The window now frames the render.
+- `handle_overlay` on the live engine is supported, using the snapshot render
+  (the capability was `False`). Labels are drawn into the offscreen picture,
+  never into the live drawing.
 
 - **Non-ASCII search terms never matched.** The stock BM25 tokenizer and the
   phrase matcher both split on `[a-z0-9]`. Every Russian and Turkish synonym in

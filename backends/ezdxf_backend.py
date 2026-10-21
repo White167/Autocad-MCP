@@ -12,7 +12,6 @@ the live COM backend.
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import math
 import os
@@ -53,6 +52,13 @@ from .quarantine import (
     QuarantineRecord,
     quarantine_refusal,
     real_call_name,
+)
+from .render import (
+    DEFAULT_MAX_HANDLE_LABELS,
+    DEFAULT_WIDTH,
+    label_anchor,
+    new_agg_figure,
+    render_doc,
 )
 
 __all__ = [
@@ -118,22 +124,8 @@ _HEADER_DEGREE_SYSVARS: frozenset[str] = frozenset({"ANGBASE"})
 log = logging.getLogger(__name__)
 
 
-def _new_agg_figure(*, figsize=None, dpi=100):
-    """Create a matplotlib Figure bound to the headless Agg canvas.
-
-    Rendering runs inside an ``asyncio.to_thread`` worker. ``pyplot.figure``
-    selects a *GUI* backend from global state (Qt/Tk), and instantiating a GUI
-    canvas off the main thread can hard-crash the interpreter (SIGSEGV). Using
-    ``Figure`` + ``FigureCanvasAgg`` directly bypasses pyplot's global backend
-    selection entirely and is thread-safe; ``savefig`` still dispatches to the
-    PDF backend by file extension when needed.
-    """
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-    from matplotlib.figure import Figure
-
-    fig = Figure(figsize=figsize, dpi=dpi)
-    FigureCanvasAgg(fig)  # binds fig.canvas to Agg (no pyplot, no GUI)
-    return fig
+# Moved to backends/render.py in v1.7; the old name stays for its callers here.
+_new_agg_figure = new_agg_figure
 
 
 try:
@@ -1079,28 +1071,7 @@ def _round_measure(result: dict) -> dict:
 
 #: How many handle labels a grounded screenshot will draw before it stops and
 #: says so. Past this the labels bury the geometry they exist to explain.
-DEFAULT_MAX_HANDLE_LABELS = 40
-
-
-def _label_anchor(ent) -> tuple[float, float] | None:
-    """Where an entity's handle label goes — the centre of its own extents.
-
-    Uses the renderer's own bbox rather than the entity's stored coordinates, so
-    the label lands where the entity is *drawn* even in a rotated frame (T0.4).
-    """
-    try:
-        from ezdxf import bbox as _bbox
-
-        box = _bbox.extents([ent])
-        if not box.has_data:
-            return None
-        return (
-            (float(box.extmin.x) + float(box.extmax.x)) / 2.0,
-            (float(box.extmin.y) + float(box.extmax.y)) / 2.0,
-        )
-    except Exception as exc:
-        log.debug("no label anchor for %s: %s", ent.dxftype(), exc)
-        return None
+_label_anchor = label_anchor  # backends/render.py since v1.7
 
 
 _IDENTITY_EXTRUSION = (0.0, 0.0, 1.0)
@@ -7844,65 +7815,34 @@ class EzdxfBackend(AutoCADBackend):
         as the whole drawing.
         """
 
+        return await self.view_render(overlay_handles=overlay_handles, max_labels=max_labels)
+
+    async def view_render(
+        self,
+        *,
+        window=None,
+        layers=None,
+        space=None,
+        mode: str = "color",
+        width: int = DEFAULT_WIDTH,
+        overlay_handles: bool = False,
+        max_labels: int = DEFAULT_MAX_HANDLE_LABELS,
+    ) -> dict:
+        """Render the in-memory document (``backends/render.py``)."""
+
         def _sync():
             try:
                 doc = self._require_doc()
-                space = self._msp()
-                from ezdxf.addons.drawing import Frontend, RenderContext
-                from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
-
-                fig = _new_agg_figure(figsize=(16, 9), dpi=100)
-                ax = fig.add_axes([0, 0, 1, 1])
-                ctx = RenderContext(doc)
-                out = MatplotlibBackend(ax)
-                Frontend(ctx, out).draw_layout(space, finalize=True)
-
-                labels: dict[str, list[float]] = {}
-                entities = list(space)
-                total = len(entities)
-                truncated = False
-                if overlay_handles and total:
-                    limit = max(0, int(max_labels))
-                    truncated = total > limit
-                    for ent in entities[:limit]:
-                        anchor = _label_anchor(ent)
-                        if anchor is None:
-                            continue
-                        handle = str(ent.dxf.get("handle", "?"))
-                        labels[handle] = [anchor[0], anchor[1]]
-                        ax.annotate(
-                            handle,
-                            anchor,
-                            color="#d62728",
-                            fontsize=7,
-                            ha="center",
-                            va="center",
-                            bbox={
-                                "boxstyle": "round,pad=0.15",
-                                "facecolor": "white",
-                                "edgecolor": "#d62728",
-                                "linewidth": 0.4,
-                                "alpha": 0.85,
-                            },
-                            annotation_clip=False,
-                        )
-                    if truncated:
-                        ax.set_title(
-                            f"handles shown for {len(labels)} of {total} entities",
-                            color="#d62728",
-                            fontsize=9,
-                        )
-
-                buf = io.BytesIO()
-                fig.savefig(buf, format="png", bbox_inches="tight", dpi=100)
-                buf.seek(0)
-                return {
-                    "png": buf.read(),
-                    "labels": labels,
-                    "labelled": len(labels),
-                    "total": total,
-                    "truncated": truncated,
-                }
+                return render_doc(
+                    doc,
+                    space=space,
+                    window=window,
+                    layers=layers,
+                    mode=mode,
+                    width=width,
+                    overlay_handles=overlay_handles,
+                    max_labels=max_labels,
+                )
             except ImportError:
                 log.warning("matplotlib not installed – screenshot unavailable")
                 return {
