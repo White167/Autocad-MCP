@@ -257,9 +257,9 @@ async def test_a_rejected_close_is_judged_by_the_document_list(monkeypatch, clos
 
 
 def test_a_missing_folder_inside_an_allowed_root_is_created(monkeypatch, tmp_path):
-    import config
     from fastmcp.exceptions import ToolError
 
+    import config
     from security import validate_path
 
     root = tmp_path / "AutoCAD"
