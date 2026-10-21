@@ -33,7 +33,7 @@
 | 2. digest, checkpoint/diff, компактные ответы | ✅ сделано: `drawing_digest`, `drawing_checkpoint`, `drawing_diff_since`, `TOOL_RESPONSES=compact` (в `spds` включён). Столбцовый формат `entity_list` не делал: у него уже есть `fields` и `compact` |
 | 5. Баги COM из скилла | ✅ в коде: 5.1 (`run_lisp` возвращает значение), 5.3–5.7, 5.9, 5.10. 5.2 (`GetVariable`) уже был исправлен в 1.6.0. 5.8 (автоповтор) частично: повтор отклонённого вызова уже есть. Живой прогон на AutoCAD 2026 — вместе с общей проверкой |
 | 4. Пак `spds` | ✅ сделано: `spds_setup`, `spds_sheet` (форма 3, А4/А3), `spds_axis`, `spds_axis_grid`, `spds_elevation`, `spds_leader` + контракт `linetype_define`. Ещё не сделано из плана: `spds_section_mark`, `spds_slope`, `spds_soil_hatch`, форма 2а, фокусы критики `spds_*`, `spds_sheet_update` |
-| 6. Скилл и инструкции | ✅ черновик нового скилла: `docs/skills/autocad-spds/SKILL.md` (≈ 8 КБ вместо 47 КБ), ставится вручную вместо прежнего. Короткие инструкции сервера сделаны на этапе 1 |
+| 6. Скилл и инструкции | ✅ черновик нового скилла: `docs/skills/autocad-spds/SKILL.md` (≈ 10 КБ вместо 47 КБ), ставится вручную вместо прежнего. Короткие инструкции сервера сделаны на этапе 1 |
 
 ## Живая проверка (AutoCAD 2026)
 
