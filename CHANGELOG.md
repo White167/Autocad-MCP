@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-10-21
+
 The first stage of the token-economy roadmap
 (`docs/plans/token-economy-roadmap.md`): a client pays for the tools it uses,
 and for less text per tool. Measured with `benchmarks/token_suite.py` on the
@@ -35,6 +37,12 @@ the default surface is ≈ 61,900 tokens, the bundled `spds` profile is
   call is still validated by the registered schema. The server instructions
   switch to a short, discipline-neutral text. This mode halves the
   model-visible listing: 61.9k → 30.9k tokens on the default surface.
+- **`spds_section_mark`, `spds_slope`, `spds_soil_hatch`** complete the pack
+  (nine tools). They draw the section line (0.7 strokes, view arrows, `1-1`),
+  the slope mark (`∠ 0,005` on a section, an arrow with `2,0 %` on a plan) and
+  the soil hatches of ГОСТ 21.302 табл. 4. Each soil uses the nearest pattern
+  that both engines carry, at the ГОСТ angle and spacing, and the result
+  reports which pattern. Sand gets its grade letter in a circle.
 - **The `spds` pack** (stage 4, SECTION 28, `engineering/spds/`). It covers
   construction drawings to ГОСТ Р 21.101-2020, one call per element, with no
   AutoLISP library to load:

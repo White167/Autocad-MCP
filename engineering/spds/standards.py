@@ -299,3 +299,49 @@ ELEVATION = {
     "shelf_extra": 1.5,
     "plan_padding": 1.0,
 }
+
+
+# ── section marks, slopes, soils (v1.7) ─────────────────────────────────────
+
+#: Линия сечения (ГОСТ 2.303 / 2.305 as the skill states them): open strokes
+#: 8-20 mm at S-1.5S (0.7 here), arrows across the strokes showing the view
+#: direction, the label beside each arrow. Lengths in mm of paper.
+SECTION_MARK = {
+    "stroke": 12.0,
+    "arrow_inset": 2.0,
+    "arrow_shaft": 6.0,
+    "arrow_head": 3.0,
+    "arrow_half_width": 0.6,
+    "label_height": 5.0,
+    "label_gap": 1.5,
+    "layer": "Разрез",
+}
+
+#: Уклон (ГОСТ Р 21.101 as the skill states it): on a section the sign "∠"
+#: (drawn as two strokes, the acute angle pointing down the slope) and the
+#: value; on a plan an arrow down the slope with the value over it.
+SLOPE = {"sign_length": 5.0, "sign_rise": 1.6, "text_height": 2.5, "arrow_length": 12.0}
+
+#: ГОСТ 21.302-2013 табл. 4 as the skill's ``spds:fam`` draws them, mapped to
+#: the nearest pattern AutoCAD and ezdxf both carry: (pattern, extra angle,
+#: pattern's own spacing in mm, default spacing on paper in mm, note). The
+#: pattern is an approximation of the conventional sign, said so in the result.
+SOILS: dict[str, tuple[str, float, float, float, str]] = {
+    "суглинок": ("ANSI31", 15.0, 3.175, 2.5, "solid lines at 60°"),
+    "супесь": ("DASH", 60.0, 3.175, 2.5, "dashed lines at 60°"),
+    "глина": ("LINE", 0.0, 3.175, 2.0, "solid horizontal lines"),
+    "насыпной": ("ANSI37", 0.0, 3.175, 2.5, "a 45° / 135° grid"),
+    "песок": ("DOTS", 0.0, 1.5875, 1.5, "dots; the grade letter in a circle"),
+}
+
+#: Sand grades: letter in the circle and the skill's dot spacing (mm of paper).
+SAND_GRADES: dict[str, tuple[str, float]] = {
+    "гравелистый": ("Г", 2.0),
+    "крупный": ("К", 1.8),
+    "средний": ("С", 1.5),
+    "мелкий": ("М", 1.2),
+    "пылеватый": ("П", 1.0),
+}
+
+LAYERS["Разрез"] = (7, "Continuous", 0.70)
+LAYERS["УГВ"] = (5, "GOST_DASH", 0.25)

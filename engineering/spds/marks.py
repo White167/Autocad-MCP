@@ -25,6 +25,9 @@ from engineering.spds.standards import (
 )
 
 __all__ = [
+    "format_slope",
+    "section_mark_prims",
+    "slope_prims",
     "axis_grid_marks",
     "axis_grid_prims",
     "axis_letters",
@@ -288,3 +291,101 @@ def axis_grid_prims(
         "horizontal": dict(zip(h_marks, ys, strict=True)),
         "digits_on": digits_on,
     }
+
+
+# ── section marks and slopes (v1.7) ────────────────────────────────────────
+
+
+def section_mark_prims(p1: Pt, p2: Pt, label: str, *, side: int = 1, scale: float = 1.0) -> list:
+    """Линия сечения from ``p1`` to ``p2`` (drawing units): an open 0.7 stroke at
+    each end, an arrow across each stroke towards ``side`` (1: to the left of
+    p1 -> p2, -1: to the right) and ``label`` beside each arrow - read as
+    ``label``-``label`` (1-1) under the section view.
+    """
+    from engineering.spds.standards import SECTION_MARK as S
+
+    if side not in (1, -1):
+        raise ValueError("side is 1 (left of p1->p2) or -1 (right)")
+    a = (p1[0] / scale, p1[1] / scale)
+    b = (p2[0] / scale, p2[1] / scale)
+    length = math.dist(a, b)
+    if length < 2 * S["stroke"]:
+        raise ValueError(
+            f"a section line needs at least {2 * S['stroke']:g} mm of paper between its ends"
+        )
+    ux, uy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
+    nx, ny = -uy * side, ux * side  # the view direction
+    layer = S["layer"]
+    prims: list = []
+    for end, sign in ((a, 1), (b, -1)):
+        tip = (end[0] + sign * ux * S["stroke"], end[1] + sign * uy * S["stroke"])
+        prims.append(Seg(end, tip, layer))
+        base = (end[0] + sign * ux * S["arrow_inset"], end[1] + sign * uy * S["arrow_inset"])
+        shaft_end = (base[0] + nx * S["arrow_shaft"], base[1] + ny * S["arrow_shaft"])
+        prims.append(Seg(base, shaft_end, LEADER_LAYER))
+        head_base = (
+            shaft_end[0] - nx * S["arrow_head"],
+            shaft_end[1] - ny * S["arrow_head"],
+        )
+        w = S["arrow_half_width"]
+        prims.append(
+            Fill(
+                (
+                    shaft_end,
+                    (head_base[0] + ux * w, head_base[1] + uy * w),
+                    (head_base[0] - ux * w, head_base[1] - uy * w),
+                ),
+                LEADER_LAYER,
+            )
+        )
+        gap = S["label_gap"] + S["label_height"] / 2
+        at = (
+            shaft_end[0] + nx * gap - sign * ux * gap,
+            shaft_end[1] + ny * gap - sign * uy * gap,
+        )
+        prims.append(Txt(at, label, S["label_height"], TEXT_LAYER, "MC"))
+    return prims
+
+
+def slope_prims(
+    at: Pt, text: str, *, direction: int = 1, kind: str = "section", scale: float = 1.0
+) -> list:
+    """A slope mark at ``at`` (drawing units), down the slope towards ``direction``
+    (1: +X, -1: -X). ``section``: the "∠" sign drawn as two strokes, its acute
+    angle pointing down the slope, the value after it. ``plan``: an arrow down
+    the slope with the value over it.
+    """
+    from engineering.spds.standards import SLOPE as S
+
+    if direction not in (1, -1):
+        raise ValueError("direction is 1 (down towards +X) or -1 (towards -X)")
+    x, y = at[0] / scale, at[1] / scale
+    h = S["text_height"]
+    if kind == "section":
+        tip = (x + direction * S["sign_length"], y)
+        back = (x, y)
+        rise = (x, y + S["sign_rise"])
+        prims: list = [Seg(back, tip, LEVEL_LAYER), Seg(rise, tip, LEVEL_LAYER)]
+        tx = x + S["sign_length"] + 1.0 if direction > 0 else x - S["sign_length"] - 1.0
+        prims.append(Txt((tx, y), text, h, TEXT_LAYER, "BL" if direction > 0 else "BR"))
+        return prims
+    if kind != "plan":
+        raise ValueError("kind is section or plan")
+    end = (x + direction * S["arrow_length"], y)
+    head = 2.5
+    prims = [
+        Seg((x, y), end, LEVEL_LAYER),
+        Fill(
+            (end, (end[0] - direction * head, y + 0.5), (end[0] - direction * head, y - 0.5)),
+            LEVEL_LAYER,
+        ),
+        Txt(((x + end[0]) / 2, y + 1.0), text, h, TEXT_LAYER, "BC"),
+    ]
+    return prims
+
+
+def format_slope(value: float, *, as_percent: bool = False, decimals: int = 3) -> str:
+    """0.005 -> "0,005", or with ``as_percent`` "0,5 %"; decimal comma."""
+    if as_percent:
+        return f"{value * 100:.{max(0, decimals - 2)}f} %".replace(".", ",")
+    return f"{value:.{decimals}f}".replace(".", ",")

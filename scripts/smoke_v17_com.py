@@ -192,6 +192,39 @@ async def run(keep: bool, headless: bool = False) -> int:
             )
             report("spds_leader", leader.get("entities") == 4, leader)
 
+            section = data(
+                await call(
+                    c,
+                    "spds_section_mark",
+                    {
+                        "x1": -1500,
+                        "y1": 5600,
+                        "x2": 13500,
+                        "y2": 5600,
+                        "label": "1",
+                        "side": -1,
+                        "scale": 100,
+                    },
+                )
+            )
+            report("spds_section_mark", section.get("title") == "1-1", section)
+            slope = data(
+                await call(c, "spds_slope", {"x": 3000, "y": 200, "value": 0.005, "scale": 100})
+            )
+            report("spds_slope", slope.get("text") == "0,005", slope)
+            soil = data(
+                await call(
+                    c,
+                    "spds_soil_hatch",
+                    {
+                        "boundary": [[0, -3000], [12000, -3000], [12000, -1500], [0, -1500]],
+                        "soil": "суглинок",
+                        "scale": 100,
+                    },
+                )
+            )
+            report("spds_soil_hatch", soil.get("pattern") == "ANSI31", soil)
+
             # stage 5: polyline vertex
             poly = data(
                 await call(

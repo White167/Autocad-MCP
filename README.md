@@ -19,11 +19,11 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 
 </div>
 
-> **v1.6 release snapshot:** 257 tools · 8 resources · 5 prompt templates · 5100 collected tests.
-> 257 is the **registered** count; a default install advertises 252 over `tools/list`,
+> **v1.7 release snapshot:** 260 tools · 8 resources · 5 prompt templates · 5104 collected tests.
+> 260 is the **registered** count; a default install advertises 255 over `tools/list`,
 > because `ENABLE_3D` is unset. `system_about` is the runtime authority.
 
-## What's new in 1.7 (unreleased)
+## What's new in 1.7
 
 **Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 8.6k tokens of tool listing instead of 62k, and still reaches all 176 tools it enables (the СПДС pack included).
 
@@ -33,7 +33,7 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 - `drawing_digest` describes the drawing's state (counts, extents, open contours, objects outside the frame, duplicates) in a few hundred characters, in place of a screenshot. `drawing_checkpoint` + `drawing_diff_since` return only what changed, one line per entity.
 - `TOOL_RESPONSES=compact` makes a write tool answer `{handle, type}` instead of the full entity record.
 - Screenshots default to 800 px and take a window in drawing units, `mono`, `jpeg` and a layer filter. On a live seat a framed screenshot is rendered from a snapshot, so the AutoCAD view never moves.
-- The `spds` pack provides construction drawings to ГОСТ Р 21.101-2020, one call each: `spds_setup` (linetypes, layers, GOST text style, `СПДС_1-M` dimension styles), `spds_sheet` (A4/A3 frame with основная надпись форма 3), `spds_axis` / `spds_axis_grid`, `spds_elevation` (`±0,000`), `spds_leader`.
+- The `spds` pack provides construction drawings to ГОСТ Р 21.101-2020, one call each: `spds_setup` (linetypes, layers, GOST text style, `СПДС_1-M` dimension styles), `spds_sheet` (A4/A3 frame with основная надпись форма 3), `spds_axis` / `spds_axis_grid`, `spds_elevation` (`±0,000`), `spds_leader`, `spds_section_mark` (`1-1`), `spds_slope`, `spds_soil_hatch` (ГОСТ 21.302).
 - Gears and keyways moved out of `core` into the `gear` pack, and GD&T into the `gdt` pack.
 - Russian search terms now work. The v1.6 Russian and Turkish synonyms never matched, because the tokenizer split on `[a-z0-9]`. Common drafting requests in Russian now resolve, using a crude Cyrillic stem.
 

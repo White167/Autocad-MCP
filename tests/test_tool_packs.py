@@ -206,6 +206,9 @@ SPDS_TOOLS = {
     "spds_axis_grid",
     "spds_elevation",
     "spds_leader",
+    "spds_section_mark",
+    "spds_slope",
+    "spds_soil_hatch",
 }
 
 ALL_PACKS = ["core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt", "spds"]

@@ -1,9 +1,9 @@
 {
   "_comment": "GENERATED FILE - do not edit by hand. Derived from the live FastMCP component registry; regenerate with `python scripts/generate_tool_inventory.py`.",
   "schema_version": 1,
-  "package_version": "1.6.0",
+  "package_version": "1.7.0",
   "totals": {
-    "tools": 257,
+    "tools": 260,
     "resources": 8,
     "prompts": 5,
     "groups": 29
@@ -30,7 +30,7 @@
     "premium": 12,
     "sheet": 11,
     "solids": 5,
-    "spds": 6,
+    "spds": 9,
     "styles": 10,
     "system": 8,
     "templates": 2,
@@ -2944,6 +2944,21 @@
       }
     },
     {
+      "name": "spds_section_mark",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС section line: open 0.7 strokes, view arrows and the 1-1 label.",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Section Line",
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "spds_setup",
       "group": "spds",
       "cost": "mutate",
@@ -2970,6 +2985,35 @@
       ],
       "annotations": {
         "title": "СПДС: Sheet with Title Block",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_slope",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС slope mark: the ∠ sign and value on a section, an arrow on a plan.",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Slope",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_soil_hatch",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "Hatch a soil layer by ГОСТ 21.302: суглинок, супесь, глина, насыпной, песок.",
+      "tags": [
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Soil Hatch",
         "readOnlyHint": false
       }
     },

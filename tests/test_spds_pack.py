@@ -256,3 +256,80 @@ async def test_the_spds_preset_lists_the_pack(monkeypatch):
         monkeypatch.setattr(config.settings, "tool_config", "")
         await server._apply_tool_profile("full")
     assert set(server.PACK_TOOL_NAMES["spds"]) <= names
+
+
+# ── section line, slope, soils (v1.7) ──────────────────────────────────────
+
+
+def test_a_section_line_has_two_strokes_two_arrows_two_labels():
+    from engineering.spds.draw import Fill
+    from engineering.spds.marks import section_mark_prims
+
+    prims = section_mark_prims((0, 0), (10000, 0), "1", side=-1, scale=100)
+    strokes = [p for p in prims if isinstance(p, Seg) and p.layer == "Разрез"]
+    assert [s.p1 for s in strokes] == [(0.0, 0.0), (100.0, 0.0)]
+    assert len([p for p in prims if isinstance(p, Fill)]) == 2
+    labels = [p for p in prims if isinstance(p, Txt)]
+    assert [t.text for t in labels] == ["1", "1"]
+    assert all(t.at[1] < 0 for t in labels), (
+        "side -1: the view looks down from a left-to-right line"
+    )
+    from engineering.spds.marks import section_mark_prims as smp
+
+    with pytest.raises(ValueError, match="at least"):
+        smp((0, 0), (10, 0), "1")
+
+
+def test_slope_text_and_signs():
+    from engineering.spds.marks import format_slope, slope_prims
+
+    assert format_slope(0.005) == "0,005"
+    assert format_slope(0.02, as_percent=True) == "2,0 %"
+    section = slope_prims((0, 0), "0,005")
+    assert [type(p).__name__ for p in section] == ["Seg", "Seg", "Txt"]
+    assert section[0].p2 == section[1].p2 == (5.0, 0.0), "the acute angle points down the slope"
+    plan = slope_prims((0, 0), "2,0 %", kind="plan", direction=-1)
+    assert plan[0].p2 == (-12.0, 0.0)
+
+
+async def test_soil_hatches_and_the_sand_letter(client):
+    clay = (
+        await client.call_tool(
+            "spds_soil_hatch",
+            {"boundary": [[0, 0], [100, 0], [100, 20], [0, 20]], "soil": "Суглинок"},
+        )
+    ).structured_content
+    assert (clay["pattern"], clay["angle"], clay["spacing_mm"]) == ("ANSI31", 15.0, 2.5)
+    sand = (
+        await client.call_tool(
+            "spds_soil_hatch",
+            {
+                "boundary": [[0, 20], [100, 20], [100, 40], [0, 40]],
+                "soil": "песок",
+                "grade": "мелкий",
+                "label_at": [50, 30],
+            },
+        )
+    ).structured_content
+    assert sand["letter"] == "М" and sand["spacing_mm"] == 1.2
+    for bad in ({"soil": "торф"}, {"soil": "глина", "grade": "мелкий"}):
+        out = await client.call_tool(
+            "spds_soil_hatch",
+            {"boundary": [[0, 0], [1, 0], [1, 1]], **bad},
+            raise_on_error=False,
+        )
+        assert out.is_error
+
+
+async def test_section_and_slope_tools(client):
+    sec = (
+        await client.call_tool(
+            "spds_section_mark",
+            {"x1": 0, "y1": 0, "x2": 10000, "y2": 0, "label": "2", "scale": 100},
+        )
+    ).structured_content
+    assert sec["title"] == "2-2" and sec["entities"] == 8
+    slope = (
+        await client.call_tool("spds_slope", {"x": 0, "y": 0, "value": 0.003})
+    ).structured_content
+    assert slope["text"] == "0,003"

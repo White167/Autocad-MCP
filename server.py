@@ -1087,6 +1087,9 @@ PACK_TOOL_NAMES: dict[str, frozenset[str]] = {
             "spds_axis_grid",
             "spds_elevation",
             "spds_leader",
+            "spds_section_mark",
+            "spds_slope",
+            "spds_soil_hatch",
         }
     ),
     "pid": frozenset(
@@ -12122,7 +12125,7 @@ async def cable_takeoff(
 
 
 # ---------------------------------------------------------------------------
-# ── SECTION 28: СПДС sheets and marks (6 tools) ─────────────────────────────
+# ── SECTION 28: СПДС sheets and marks (9 tools) ─────────────────────────────
 # ---------------------------------------------------------------------------
 #
 # engineering/spds/: ГОСТ Р 21.101-2020 sheets and marks for construction
@@ -12488,6 +12491,177 @@ async def spds_leader(
         raise ToolError(f"spds_leader: {exc}") from exc
     handles = await _spds_draw(ctx, prims, scale=scale)
     return {"ok": True, "entities": len(handles), "handles": handles}
+
+
+@cad_tool(
+    summary="СПДС section line: open 0.7 strokes, view arrows and the 1-1 label.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Section Line", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_section_mark(
+    x1: Annotated[float, "Section line start X"],
+    y1: Annotated[float, "Section line start Y"],
+    x2: Annotated[float, "Section line end X"],
+    y2: Annotated[float, "Section line end Y"],
+    label: Annotated[str, Field(min_length=1, max_length=4, description="1, 2, А ...")],
+    side: Annotated[
+        int,
+        Field(default=1, description="View direction: 1 left of start->end, -1 right."),
+    ] = 1,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """Линия сечения: an open stroke (layer Разрез, 0.7 mm) at each end of
+    start -> end, an arrow across each stroke showing the view direction and the
+    label by each arrow; the view itself is titled `label-label` (1-1).
+    """
+    from engineering.spds.marks import section_mark_prims
+
+    try:
+        prims = section_mark_prims((x1, y1), (x2, y2), label, side=side, scale=scale)
+    except ValueError as exc:
+        raise ToolError(f"spds_section_mark: {exc}") from exc
+    handles = await _spds_draw(ctx, prims, scale=scale)
+    return {"ok": True, "title": f"{label}-{label}", "entities": len(handles)}
+
+
+@cad_tool(
+    summary="СПДС slope mark: the ∠ sign and value on a section, an arrow on a plan.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Slope", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_slope(
+    x: Annotated[float, "Where the mark starts (drawing units)"],
+    y: Annotated[float, "Where the mark starts (drawing units)"],
+    value: Annotated[
+        float | None, Field(default=None, description="Slope as a ratio, e.g. 0.005.")
+    ] = None,
+    text: Annotated[str | None, Field(default=None, description="Ready text instead.")] = None,
+    as_percent: Annotated[bool, Field(default=False, description="Write 0,5 % not 0,005.")] = False,
+    direction: Annotated[int, Field(default=1, description="Down the slope: 1 +X, -1 -X.")] = 1,
+    kind: Annotated[str, Field(default="section", description="section or plan.")] = "section",
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """A slope mark. `section`: the sign ∠ drawn as two strokes, its acute angle
+    pointing down the slope, and the value after it; `plan`: an arrow down the
+    slope with the value over it. `value` is written with a decimal comma
+    (0,005) or, with `as_percent`, as 0,5 %.
+    """
+    from engineering.spds.marks import format_slope, slope_prims
+
+    if (value is None) == (text is None):
+        raise ToolError("spds_slope: give value or text, exactly one")
+    label = text if text is not None else format_slope(value, as_percent=as_percent)
+    try:
+        prims = slope_prims((x, y), label, direction=direction, kind=kind, scale=scale)
+    except ValueError as exc:
+        raise ToolError(f"spds_slope: {exc}") from exc
+    handles = await _spds_draw(ctx, prims, scale=scale)
+    return {"ok": True, "text": label, "entities": len(handles)}
+
+
+@cad_tool(
+    summary="Hatch a soil layer by ГОСТ 21.302: суглинок, супесь, глина, насыпной, песок.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Soil Hatch", "readOnlyHint": False},
+    tags={"spds", "create"},
+)
+async def spds_soil_hatch(
+    boundary: Annotated[
+        list[list[float]],
+        Field(min_length=3, description="Closed boundary [[x, y], ...] (drawing units)."),
+    ],
+    soil: Annotated[str, Field(description="суглинок, супесь, глина, насыпной or песок.")],
+    grade: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Sand only: гравелистый, крупный, средний, мелкий, пылеватый "
+            "(sets the dot spacing and the letter).",
+        ),
+    ] = None,
+    spacing: Annotated[
+        float | None,
+        Field(default=None, gt=0, description="Line / dot spacing in mm of paper."),
+    ] = None,
+    label_at: Annotated[
+        list[float] | None,
+        Field(
+            default=None,
+            min_length=2,
+            max_length=2,
+            description="Sand: where the grade letter in a circle goes.",
+        ),
+    ] = None,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """A soil hatch after ГОСТ 21.302-2013 табл. 4, as the autocad-spds skill
+    draws it: суглинок solid lines at 60°, супесь dashed at 60°, глина horizontal
+    lines, насыпной a 45/135° grid, песок dots (gravelly to silty: 2.0 to 1.0 mm)
+    with the grade letter Г / К / С / М / П in a 4.5 mm circle at `label_at`.
+    The pattern is the nearest one AutoCAD and ezdxf both carry
+    (ANSI31 / DASH / LINE / ANSI37 / DOTS) at the ГОСТ angle and spacing - an
+    approximation of the conventional sign, reported as `pattern`. Layer
+    Штриховка. Gravel and the soil-plant layer have no pattern here: draw
+    them with circles / by hand.
+    """
+    from engineering.spds.draw import Circ, Txt, ensure_resources
+    from engineering.spds.standards import SAND_GRADES, SOILS
+
+    key = soil.strip().lower()
+    if key not in SOILS:
+        raise ToolError(f"spds_soil_hatch: soil {soil!r} is not tabulated; have {', '.join(SOILS)}")
+    pattern, angle, base, default_spacing, note = SOILS[key]
+    letter = None
+    if key == "песок" and grade is not None:
+        g = grade.strip().lower()
+        if g not in SAND_GRADES:
+            raise ToolError(
+                f"spds_soil_hatch: sand grade {grade!r} unknown; have {', '.join(SAND_GRADES)}"
+            )
+        letter, default_spacing = SAND_GRADES[g]
+    elif grade is not None:
+        raise ToolError("spds_soil_hatch: grade applies to песок only")
+    sp = float(spacing or default_spacing)
+    backend = _backend(ctx)
+    await ensure_resources(backend, ["Штриховка", "Текст"], text_style=letter is not None)
+    hatch = await backend.entity_create_hatch(
+        pattern,
+        [list(p[:2]) for p in boundary],
+        scale=sp * float(scale) / base,
+        angle=angle,
+        layer="Штриховка",
+    )
+    out = {
+        "ok": True,
+        "handle": hatch.handle,
+        "pattern": pattern,
+        "angle": angle,
+        "spacing_mm": sp,
+        "sign": note,
+    }
+    if letter is not None and label_at is not None:
+        k = float(scale)
+        await _spds_draw(
+            ctx,
+            [
+                Circ((label_at[0] / k, label_at[1] / k), 2.25, "Штриховка"),
+                Txt((label_at[0] / k, label_at[1] / k), letter, 2.5, "Текст", "MC"),
+            ],
+            scale=k,
+        )
+        out["letter"] = letter
+    return out
 
 
 # ---------------------------------------------------------------------------

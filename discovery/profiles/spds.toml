@@ -34,6 +34,7 @@ discovery = "hybrid"
 pinned = [
     # the СПДС pack (SECTION 28)
     "spds_setup", "spds_sheet", "spds_axis", "spds_axis_grid", "spds_elevation", "spds_leader",
+    "spds_section_mark", "spds_slope", "spds_soil_hatch",
     # drawing
     "drawing_new", "drawing_open", "drawing_save", "drawing_save_as", "drawing_info",
     "drawing_export_pdf", "drawing_undo", "document_list", "document_activate",

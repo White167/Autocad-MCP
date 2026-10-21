@@ -1608,6 +1608,13 @@ TOOL_ALIASES: dict[str, ToolAliases] = {
         synonyms=("level mark", "elevation mark", "level symbol", "height mark")
     ),
     "spds_leader": ToolAliases(synonyms=("gost leader", "callout with shelf", "leader note")),
+    "spds_section_mark": ToolAliases(
+        synonyms=("section line", "cutting plane line", "section mark", "section arrows")
+    ),
+    "spds_slope": ToolAliases(synonyms=("slope mark", "gradient arrow", "fall arrow")),
+    "spds_soil_hatch": ToolAliases(
+        synonyms=("soil hatch", "geology hatch", "ground hatch", "borehole log hatch")
+    ),
     "tool_help": ToolAliases(
         acad=("HELP",),
         synonyms=(
@@ -2870,12 +2877,18 @@ _RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "tool_help": ((), ("справка по инструменту", "описание инструмента")),
     "drawing_digest": ((), ("сводка по чертежу", "состояние чертежа", "что на чертеже сейчас")),
     "drawing_checkpoint": ((), ("контрольная точка", "запомнить состояние")),
-    "spds_setup": ((), ("настроить спдс", "слои по госту", "стили по госту", "оформление по госту")),
+    "spds_setup": (
+        (),
+        ("настроить спдс", "слои по госту", "стили по госту", "оформление по госту"),
+    ),
     "spds_sheet": ((), ("рамка", "штамп", "основная надпись", "форма 3", "рамка со штампом")),
     "spds_axis": ((), ("ось", "координационная ось", "марка оси")),
     "spds_axis_grid": ((), ("сетка осей", "координационные оси", "оси здания")),
     "spds_elevation": ((), ("отметка", "высотная отметка", "отметка уровня")),
     "spds_leader": ((), ("выноска по госту", "полка", "выноска с полкой")),
+    "spds_section_mark": ((), ("линия разреза", "разрез", "линия сечения", "секущая")),
+    "spds_slope": ((), ("уклон", "знак уклона", "стрелка уклона")),
+    "spds_soil_hatch": ((), ("штриховка грунта", "грунт", "суглинок", "супесь", "глина", "песок")),
     "drawing_diff_since": ((), ("что изменилось", "изменения с контрольной точки")),
 }
 

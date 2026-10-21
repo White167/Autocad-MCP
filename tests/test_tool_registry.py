@@ -495,7 +495,7 @@ async def test_tool_groups_is_byte_identical_to_the_source_declared_grouping():
 
 
 async def test_tool_group_sizes_are_unchanged():
-    """Frozen snapshot of the surface (257 tools, 29 groups).
+    """Frozen snapshot of the surface (260 tools, 29 groups).
 
     Taken before @cad_tool landed at 131 tools; `batch` moved 2 -> 3 when
     v1.5.0's `cad_batch` joined `entity_batch_create`/`entity_batch_modify`, and
@@ -605,7 +605,7 @@ async def test_tool_group_sizes_are_unchanged():
     v1.7 adds `tool_help` (the full text behind the short listing) to
     SECTION 11: `system` 7 -> 8; and `drawing_digest`, `drawing_checkpoint`,
     `drawing_diff_since` to SECTION 26: `understanding` 4 -> 7; and SECTION 28,
-    the six `spds_*` tools, as their own `spds` group (ranked first). 257 in all,
+    the nine `spds_*` tools, as their own `spds` group (ranked first). 260 in all,
     29 groups.
     """
     sizes = {label: len(names) for label, names in (await server._tool_groups()).items()}
@@ -631,7 +631,7 @@ async def test_tool_group_sizes_are_unchanged():
         "premium": 12,
         "sheet": 11,
         "solids": 5,
-        "spds": 6,
+        "spds": 9,
         "styles": 10,
         "system": 8,
         "templates": 2,
@@ -640,4 +640,4 @@ async def test_tool_group_sizes_are_unchanged():
         "validation": 1,
         "view": 4,
     }
-    assert sum(sizes.values()) == 257
+    assert sum(sizes.values()) == 260
