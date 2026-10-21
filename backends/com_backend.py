@@ -89,22 +89,64 @@ _COM_ERROR: tuple[type[BaseException], ...] = (pywintypes.com_error,) if _COM_IM
 _RPC_E_CALL_REJECTED = -2147418111
 
 
-def _wait_out_rejected_call(read: Callable[[], Any], *, budget_s: float, first_pause_s: float):
-    """Run a read-only COM callable again while it answers ``RPC_E_CALL_REJECTED``.
+def _is_rejected_lookup(exc: BaseException) -> bool:
+    """True for pywin32's disguise of a rejected *name lookup*.
 
-    Only for callables that change nothing on the seat (the rejection means
-    the refused call did not run, but an earlier call inside ``read`` did).
-    Pauses double from ``first_pause_s`` up to one second and stop at
-    ``budget_s``; any other ``com_error`` is re-raised on the first attempt.
+    A late-bound ``obj.Count`` first asks ``GetIDsOfNames`` for the member.
+    When AutoCAD rejects that call, pywin32's ``dynamic.__getattr__`` swallows
+    the ``com_error`` and raises ``AttributeError("<unknown>.Count")`` with no
+    HRESULT attached - measured on AutoCAD 2024 (24.3) right after
+    ``Document.Close``, where ``app.Documents.Count`` failed this way and
+    ``drawing_close`` reported an error for a document it had closed.
+    """
+    return isinstance(exc, AttributeError) and str(exc).startswith("<unknown>.")
+
+
+def _set_int_sysvar(doc, name: str, value: int) -> None:
+    """``SetVariable`` for an integer variable, as a short when AutoCAD wants one.
+
+    A Python int travels as ``VT_I4``. AutoCAD 2024 (24.3) refuses that for
+    short-integer variables such as LAYOUTCREATEVIEWPORT with "error setting
+    the system variable" and accepts the same value as ``VT_I2`` - measured
+    live, which is why v1.7's viewport suppression never took effect there.
+    A refused call is re-raised untouched, so the caller's retry still sees it.
+    """
+    try:
+        doc.SetVariable(name, int(value))
+    except _COM_ERROR as exc:
+        if _is_rejection(exc) or not _COM_IMPORTS_OK:
+            raise
+        doc.SetVariable(name, win32com.client.VARIANT(pythoncom.VT_I2, int(value)))
+
+
+#: How long a layout switch waits for AutoCAD to accept calls again.
+_SWITCH_SETTLE_BUDGET_S = 20.0
+_SWITCH_SETTLE_FIRST_PAUSE_S = 0.1
+
+
+def _wait_out_rejected_call(read: Callable[[], Any], *, budget_s: float, first_pause_s: float):
+    """Run a COM callable again while it answers ``RPC_E_CALL_REJECTED``.
+
+    Only for callables that change nothing on the seat, or whose one write is
+    idempotent (the rejection means the refused call did not run, but an
+    earlier call inside ``read`` did). A rejected member lookup, which pywin32
+    reports as ``AttributeError("<unknown>.Member")``, counts as a rejection
+    too; a member that really does not exist therefore fails only once the
+    budget is spent. Pauses double from ``first_pause_s`` up to one second and
+    stop at ``budget_s``; any other ``com_error`` is re-raised on the first
+    attempt.
     """
     deadline = time.monotonic() + budget_s
     pause = first_pause_s
     while True:
         try:
             return read()
-        except _COM_ERROR as exc:
-            hr = exc.args[0] if exc.args else 0
-            if hr != _RPC_E_CALL_REJECTED or time.monotonic() + pause > deadline:
+        except (*_COM_ERROR, AttributeError) as exc:
+            if isinstance(exc, AttributeError):
+                rejected = _is_rejected_lookup(exc)
+            else:
+                rejected = (exc.args[0] if exc.args else 0) == _RPC_E_CALL_REJECTED
+            if not rejected or time.monotonic() + pause > deadline:
                 raise
             time.sleep(pause)
             pause = min(pause * 2, 1.0)
@@ -129,6 +171,11 @@ def _com_init():
     """COM thread initializer – called once by the ThreadPoolExecutor."""
     if _COM_IMPORTS_OK:
         pythoncom.CoInitialize()
+        # Let COM retry a call AutoCAD refuses while busy, instead of failing
+        # it (see backends/com_message_filter.py). One per apartment.
+        from . import com_message_filter
+
+        com_message_filter.register()
 
 
 def _com_teardown():
@@ -306,12 +353,42 @@ def _template_as_dwt(app, source: Path) -> tuple[Path, bool]:
     return dwt, False
 
 
+def _locked_output(path: str) -> str | None:
+    """Why ``path`` cannot be overwritten, or None when it can (or is new)."""
+    target = Path(path)
+    if not target.exists():
+        return None
+    try:
+        with target.open("r+b"):
+            return None
+    except OSError as exc:
+        return (
+            f"{target.name} exists and cannot be overwritten ({exc.strerror or exc}): "
+            "it is probably open in a PDF viewer. Close it or export to another path."
+        )
+
+
 def _acad_doc():
-    """Return active AutoCAD document."""
+    """Return active AutoCAD document.
+
+    Nearly every tool starts here, so this pure read is where a busy seat is
+    waited out: after a layout switch AutoCAD processes the tab change in its
+    own message loop, once the switching call has returned, and refuses calls
+    meanwhile. Measured on AutoCAD 2024 (24.3): the next tool's first call -
+    this ``Documents.Count`` - failed as ``<unknown>.Count`` about one run in
+    three after ``spds_sheet`` / ``layout_set_current``.
+    """
     app = _acad_app()
-    if app.Documents.Count == 0:
+
+    def _read():
+        return app.ActiveDocument if app.Documents.Count else None
+
+    doc = _wait_out_rejected_call(
+        _read, budget_s=_SWITCH_SETTLE_BUDGET_S, first_pause_s=_SWITCH_SETTLE_FIRST_PAUSE_S
+    )
+    if doc is None:
         raise RuntimeError("No drawing is open in AutoCAD. Open or create a .dwg file first.")
-    return app.ActiveDocument
+    return doc
 
 
 def _msp():
@@ -482,7 +559,13 @@ def _load_linetype(doc, name: str, lin_file: str) -> None:
     (the callers check the table first, so that one is not reached).
     """
     try:
-        doc.Linetypes.Load(name, lin_file)
+        # A refused call never ran, so the load is retried while AutoCAD
+        # rejects it (seen live on AutoCAD 2024 after a SendCommand).
+        _wait_out_rejected_call(
+            lambda: doc.Linetypes.Load(name, lin_file),
+            budget_s=_SWITCH_SETTLE_BUDGET_S,
+            first_pause_s=_SWITCH_SETTLE_FIRST_PAUSE_S,
+        )
     except Exception as exc:
         raise RuntimeError(
             f"Failed to load linetype '{name}' from '{lin_file}': "
@@ -1648,43 +1731,62 @@ def _no_auto_viewport(doc):
     old = None
     try:
         old = doc.GetVariable("LAYOUTCREATEVIEWPORT")
-        doc.SetVariable("LAYOUTCREATEVIEWPORT", 0)
+        _set_int_sysvar(doc, "LAYOUTCREATEVIEWPORT", 0)
     except Exception as exc:  # a CAD without the variable: nothing to suppress
         log.debug("LAYOUTCREATEVIEWPORT unavailable: %s", exc)
         old = None
     try:
         yield
+        # A layout opened for the first time is initialised (page setup,
+        # regeneration) after the switch returns, and AutoCAD rejects calls
+        # meanwhile - the next tool's first call failed with "call was
+        # rejected" (measured on AutoCAD 2024 / 24.3). Wait it out here with
+        # a read, so the switch returns only once the seat answers again.
+        _wait_out_rejected_call(
+            lambda: doc.ActiveLayout.Name,
+            budget_s=_SWITCH_SETTLE_BUDGET_S,
+            first_pause_s=_SWITCH_SETTLE_FIRST_PAUSE_S,
+        )
     finally:
         if old is not None:
+            # The operator's value must come back: a rejected restore used to
+            # be logged at debug level and left LAYOUTCREATEVIEWPORT at 0.
+            # Setting a variable to a value is idempotent, so it is retried.
             try:
-                doc.SetVariable("LAYOUTCREATEVIEWPORT", old)
+                _wait_out_rejected_call(
+                    lambda: _set_int_sysvar(doc, "LAYOUTCREATEVIEWPORT", old),
+                    budget_s=_SWITCH_SETTLE_BUDGET_S,
+                    first_pause_s=_SWITCH_SETTLE_FIRST_PAUSE_S,
+                )
             except Exception as exc:
-                log.debug("LAYOUTCREATEVIEWPORT restore failed: %s", exc)
+                log.warning("LAYOUTCREATEVIEWPORT restore to %s failed: %s", old, exc)
 
 
 def _delete_other_viewports(doc, keep_handle: str) -> list[str]:
     """Delete every viewport in the active paper space but ``keep_handle``.
 
-    The layout's own paper-space viewport (``Number`` 1, the sheet itself) is
-    never deleted: AutoCAD refuses it, and it is not a model window.
+    The layout's own paper-space viewport (the sheet itself) is never deleted:
+    it is not a model window. It is the first viewport of the sheet's block -
+    AutoCAD makes it when the layout is first initialised, before any other.
+    v1.7 told it by ``Number`` == 1, but an AcadPViewport has no ``Number``
+    member (AttributeError on AutoCAD 2024 / 24.3), so the guard never fired:
+    the sheet's viewport was deleted and the kept one went to status -1, off
+    screen, in every export.
     """
-    removed: list[str] = []
     space = doc.PaperSpace
-    for index in range(int(space.Count) - 1, -1, -1):
-        entity = space.Item(index)
-        if str(getattr(entity, "ObjectName", "")) != "AcDbViewport":
-            continue
+    viewports = [
+        entity
+        for entity in (space.Item(i) for i in range(int(space.Count)))
+        if str(getattr(entity, "ObjectName", "")) == "AcDbViewport"
+    ]
+    removed: list[str] = []
+    for entity in reversed(viewports[1:]):
         handle = str(entity.Handle)
         if handle == keep_handle:
             continue
-        try:
-            if int(entity.Number) == 1:
-                continue
-        except Exception:
-            pass
         entity.Delete()
         removed.append(handle)
-    return removed
+    return list(reversed(removed))
 
 
 #: ActiveX AcAlignment for each TEXT justification code
@@ -1708,6 +1810,34 @@ _ACTIVEX_TEXT_ALIGNMENT = {
 #: How long system_run_lisp waits for AutoCAD to evaluate a queued form.
 LISP_RESULT_TIMEOUT_S = 20.0
 _LISP_ERROR_MARK = "__acadmcp_error__:"
+
+
+def _is_rejection(exc: BaseException) -> bool:
+    """A refused call (``RPC_E_CALL_REJECTED``, or pywin32's refused lookup)."""
+    if _is_rejected_lookup(exc):
+        return True
+    return isinstance(exc, _COM_ERROR) and (exc.args[0] if exc.args else 0) == _RPC_E_CALL_REJECTED
+
+
+def _settle_after_command(doc, budget_s: float = 5.0, poll_s: float = 0.05) -> bool:
+    """Wait until the seat answers a read with no command active; never raise.
+
+    A queued ``SendCommand`` form is still finishing its command line when its
+    result is already readable, and AutoCAD rejects calls meanwhile - measured
+    on AutoCAD 2024 (24.3): the call after ``system_run_lisp`` (spds_setup's
+    ``Linetypes.Load``) failed as ``<unknown>.Load``. Returns True once settled.
+    """
+    deadline = time.monotonic() + budget_s
+    while True:
+        try:
+            if int(doc.GetVariable("CMDACTIVE")) == 0:
+                return True
+        except Exception as exc:
+            if not _is_rejection(exc):
+                return False
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(poll_s)
 
 
 def _await_lisp_result(doc, sentinel: str, timeout_s: float, poll_s: float = 0.05):
@@ -2314,6 +2444,12 @@ class ComBackend(AutoCADBackend):
         """
 
         def _sync():
+            # A PDF another program holds open makes PlotToFile return a bare
+            # False, which read as a plot-area problem (seen on AutoCAD 2024
+            # with the previous export still open in a reader). Say so first.
+            locked = _locked_output(path)
+            if locked:
+                return {"ok": False, "path": path, "layout": layout or "Model", "error": locked}
             doc = _acad_doc()
             target = layout.strip() if layout and layout.strip() else "Model"
             previous = doc.ActiveLayout.Name
@@ -2328,7 +2464,7 @@ class ComBackend(AutoCADBackend):
                 except Exception as exc:
                     log.debug("BACKGROUNDPLOT unreadable (%s); plotting as configured", exc)
                 if old_background not in (None, 0):
-                    doc.SetVariable("BACKGROUNDPLOT", 0)
+                    _set_int_sysvar(doc, "BACKGROUNDPLOT", 0)
                 plotted = doc.Plot.PlotToFile(path, "DWG To PDF.pc3")
                 written = Path(path)
                 if not plotted:
@@ -2356,7 +2492,7 @@ class ComBackend(AutoCADBackend):
             finally:
                 if old_background not in (None, 0):
                     try:
-                        doc.SetVariable("BACKGROUNDPLOT", old_background)
+                        _set_int_sysvar(doc, "BACKGROUNDPLOT", old_background)
                     except Exception as exc:
                         log.warning("could not restore BACKGROUNDPLOT=%s: %s", old_background, exc)
                 if switched:
@@ -2392,12 +2528,14 @@ class ComBackend(AutoCADBackend):
     async def layout_set_current(self, name: str) -> dict:
         def _sync():
             doc = _acad_doc()
-            try:
-                with _no_auto_viewport(doc):
-                    doc.ActiveLayout = doc.Layouts.Item(name)
-            except Exception:
+            # Resolve first: a blanket except around the switch used to turn
+            # any failure - a rejected call included - into "not found".
+            target = self._find_layout(doc, name)
+            if target is None:
                 return {"ok": False, "error": f"Layout not found: {name}"}
-            return {"ok": True, "current": name}
+            with _no_auto_viewport(doc):
+                doc.ActiveLayout = doc.Layouts.Item(target)
+            return {"ok": True, "current": target}
 
         return await self._run(_sync)
 
@@ -2544,6 +2682,7 @@ class ComBackend(AutoCADBackend):
         view_center_y: float,
         scale: float = 1.0,
         remove_others: bool = False,
+        layer: str | None = None,
     ) -> dict:
         def _sync():
             if scale <= 0:
@@ -2575,6 +2714,10 @@ class ComBackend(AutoCADBackend):
                 # and every COM viewport looked at the model origin instead of
                 # where the caller asked. The failure is reported now.
                 viewport.Target = _apoint(view_center_x, view_center_y)
+                if layer:
+                    # ActiveX will not create a layer on assignment.
+                    doc.Layers.Add(layer)
+                    viewport.Layer = layer
                 out = {
                     "ok": True,
                     "handle": viewport.Handle,
@@ -2694,15 +2837,19 @@ class ComBackend(AutoCADBackend):
             # A clean or untitled document is never asked to save: Close(True)
             # on a clean file is a no-op write, on an untitled one a dialog.
             rejected = False
+            save_flag = bool(save and dirty and path)
             try:
-                doc.Close(bool(save and dirty and path))
-            except _COM_ERROR as exc:
+                doc.Close(save_flag)
+            except (*_COM_ERROR, AttributeError) as exc:
                 # v1.7: AutoCAD can answer the Close itself with "call was
                 # rejected" (RPC_E_CALL_REJECTED) and close the document anyway
                 # - the autocad-spds skill saw an error for a closed drawing.
                 # Ask the document list, which changes nothing, before deciding.
-                hr = exc.args[0] if exc.args else 0
-                if hr != _RPC_E_CALL_REJECTED:
+                lookup = _is_rejected_lookup(exc)
+                if not lookup and (
+                    isinstance(exc, AttributeError)
+                    or (exc.args[0] if exc.args else 0) != _RPC_E_CALL_REJECTED
+                ):
                     raise
 
                 def _still_open():
@@ -2712,7 +2859,10 @@ class ComBackend(AutoCADBackend):
                     return False
 
                 if self._wait_out_rejected_call(_still_open):
-                    raise
+                    if not lookup:
+                        raise
+                    # Only the name lookup was refused: Close never ran.
+                    self._wait_out_rejected_call(lambda: doc.Close(save_flag))
                 rejected = True
 
             def _read_after_close():
@@ -2726,7 +2876,7 @@ class ComBackend(AutoCADBackend):
                 "ok": True,
                 "closed": name,
                 "path": path,
-                "saved": bool(save and dirty and path),
+                "saved": save_flag,
                 "discarded_changes": bool(dirty and not save),
                 "active": active,
                 "open_documents": count,
@@ -4718,13 +4868,13 @@ class ComBackend(AutoCADBackend):
                 log.debug("doc.GetVariable(AUDITCTL) failed; AUDIT runs unlogged: %s", exc)
                 previous = None
             if previous is not None:
-                doc.SetVariable("AUDITCTL", 1)
+                _set_int_sysvar(doc, "AUDITCTL", 1)
             try:
                 doc.SendCommand("_AUDIT Y\n")
             finally:
                 if previous is not None:
                     try:
-                        doc.SetVariable("AUDITCTL", previous)
+                        _set_int_sysvar(doc, "AUDITCTL", previous)
                     except Exception:
                         log.debug("could not restore AUDITCTL on the document", exc_info=True)
 
@@ -7052,14 +7202,16 @@ class ComBackend(AutoCADBackend):
 
         from engineering.understand.snapshot import _com_export
 
-        from .render import render_doc
+        from .render import render_doc, wake_offscreen_viewports
 
         written, folder, _source = await self._run(_com_export, self, None)
         try:
 
             def _render():
+                snapshot = ezdxf.readfile(written)
+                wake_offscreen_viewports(snapshot)  # the snapshot, never the drawing
                 return render_doc(
-                    ezdxf.readfile(written),
+                    snapshot,
                     space=space,
                     window=window,
                     layers=layers,
@@ -7258,7 +7410,10 @@ class ComBackend(AutoCADBackend):
                 payload = _av(coerced) if isinstance(current, (tuple, list)) else coerced
             except Exception as exc:
                 log.debug("set_variable type probe for %s failed: %s", name, exc)
-            doc.SetVariable(name, payload)
+            if isinstance(payload, int) and not isinstance(payload, bool):
+                _set_int_sysvar(doc, name, payload)  # a short variable wants VT_I2
+            else:
+                doc.SetVariable(name, payload)
             return {"ok": True, "variable": name, "value": coerced}
 
         return await self._run(_sync)
@@ -7319,6 +7474,8 @@ class ComBackend(AutoCADBackend):
             )
             self._safe_send_command(doc, wrapped)
             result, pending = _await_lisp_result(doc, sentinel, LISP_RESULT_TIMEOUT_S)
+            if not pending:
+                _settle_after_command(doc)
             if pending:
                 return {
                     "ok": True,
@@ -7683,7 +7840,7 @@ class ComBackend(AutoCADBackend):
             for var in ("OSMODE", "SNAPMODE", "CMDECHO"):
                 try:
                     saved[var] = doc.GetVariable(var)
-                    doc.SetVariable(var, 0)
+                    _set_int_sysvar(doc, var, 0)
                 except Exception:
                     pass
             # Snapshot model-space handles (best-effort).
@@ -7697,8 +7854,9 @@ class ComBackend(AutoCADBackend):
             while True:
                 try:
                     active = int(doc.GetVariable("CMDACTIVE"))
-                except Exception:
-                    active = 0
+                except Exception as exc:
+                    # A refused read means the seat is busy, not idle.
+                    active = 1 if _is_rejection(exc) else 0
                 if active == 0:
                     break
                 if time.monotonic() > deadline:
@@ -7718,7 +7876,7 @@ class ComBackend(AutoCADBackend):
         finally:
             for var, val in saved.items():
                 try:
-                    doc.SetVariable(var, val)
+                    _set_int_sysvar(doc, var, val)
                 except Exception:
                     pass
 

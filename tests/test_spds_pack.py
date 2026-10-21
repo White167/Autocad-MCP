@@ -9,6 +9,7 @@ six tools end to end on the headless engine.
 
 from __future__ import annotations
 
+import ezdxf
 import pytest
 import pytest_asyncio
 from fastmcp import Client
@@ -321,6 +322,40 @@ async def test_soil_hatches_and_the_sand_letter(client):
         assert out.is_error
 
 
+@pytest.mark.parametrize("measurement", [1, 0])
+async def test_the_soil_hatch_spacing_holds_in_an_imperial_drawing_too(
+    client, tmp_path, measurement
+):
+    # A drawing from acad.dwt has MEASUREMENT 0, so both engines take ANSI31
+    # from acad.pat (0.125 instead of 3.175): on AutoCAD 2024 the hatch came
+    # out 25.4x too dense until the scale followed the pattern file.
+    import math
+
+    await client.call_tool("system_set_variable", {"name": "MEASUREMENT", "value": measurement})
+    out = (
+        await client.call_tool(
+            "spds_soil_hatch",
+            {
+                "boundary": [[0, 0], [12000, 0], [12000, 1500], [0, 1500]],
+                "soil": "суглинок",
+                "scale": 100,
+            },
+        )
+    ).structured_content
+    assert out["pattern_file"] == ("acadiso.pat" if measurement else "acad.pat (MEASUREMENT 0)")
+    path = tmp_path / "soil.dxf"
+    await client.call_tool("drawing_save_as", {"path": str(path)})
+    hatch = ezdxf.readfile(path).query("HATCH").first
+    line = hatch.pattern.lines[0]
+    assert math.hypot(line.offset[0], line.offset[1]) == pytest.approx(2.5 * 100, rel=1e-6)
+
+
+def test_setup_makes_the_drawing_metric():
+    from engineering.spds.setup import SETUP_VARIABLES
+
+    assert SETUP_VARIABLES["MEASUREMENT"] == 1
+
+
 async def test_section_and_slope_tools(client):
     sec = (
         await client.call_tool(
@@ -333,3 +368,40 @@ async def test_section_and_slope_tools(client):
         await client.call_tool("spds_slope", {"x": 0, "y": 0, "value": 0.003})
     ).structured_content
     assert slope["text"] == "0,003"
+
+
+def test_full_bleed_media_names():
+    from engineering.standards.papers import canonical_media_name, resolve_page_setup
+
+    assert canonical_media_name("ISO_A3", "landscape", True) == (
+        "ISO_full_bleed_A3_(420.00_x_297.00_MM)"
+    )
+    assert canonical_media_name("ISO_A3") == "ISO_A3_(420.00_x_297.00_MM)"
+    assert resolve_page_setup("A4", "portrait", full_bleed=True)["full_bleed"] is True
+    with pytest.raises(ValueError, match="full_bleed"):
+        resolve_page_setup("A3", full_bleed="yes")
+
+
+async def test_a_sheet_on_a_layout_prints_as_that_sheet(client):
+    # On AutoCAD 2024 the layout kept its default page setup: the PDF of an A3
+    # sheet was A4 and clipped; plain ISO A3 media still clips 17/17/5/5 mm.
+    await client.call_tool("layout_create", {"name": "Лист9"})
+    out = (
+        await client.call_tool("spds_sheet", {"format": "A3", "layout": "Лист9"})
+    ).structured_content
+    assert out["page_setup"] == {
+        "ok": True,
+        "media": "ISO_full_bleed_A3_(420.00_x_297.00_MM)",
+        "scale": "1:1",
+    }
+    row = (await client.call_tool("page_setup_list", {"layout": "Лист9"})).structured_content[
+        "layouts"
+    ][0]
+    assert row["size_mm"] == [420.0, 297.0] and row["margins_mm"] == [0.0, 0.0, 0.0, 0.0]
+    assert row["scale"] == "1:1" and row["plot_area"] == "layout"
+    moved = (
+        await client.call_tool(
+            "spds_sheet", {"format": "A4", "layout": "Лист9", "origin": [500, 0]}
+        )
+    ).structured_content
+    assert moved["page_setup"]["ok"] is False and "origin" in moved["page_setup"]["skipped"]

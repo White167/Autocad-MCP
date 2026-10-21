@@ -116,6 +116,36 @@ def _resolve_layout(doc, space: str | None):
     raise ValueError(f"no layout named {space!r}; layouts: {', '.join(doc.layouts.names())}")
 
 
+def wake_offscreen_viewports(doc) -> int:
+    """Turn status -1 ("on, but off screen") viewports into drawn ones; return how many.
+
+    For a snapshot only - it edits ``doc``. AutoCAD exports the viewports of
+    a layout that is not on screen with status -1, and ezdxf's frontend draws
+    only status > 0 (status 1 being the sheet itself), so a live render of a
+    sheet showed the frame and nothing through its viewports (measured on
+    AutoCAD 2024 / 24.3). A plot draws them, so the picture should too. The
+    sheet's own viewport (id 1, else the first) becomes status 1; status 0
+    (off) is left off.
+    """
+    woken = 0
+    for layout in doc.layouts:
+        if layout.is_modelspace:
+            continue
+        viewports = list(layout.query("VIEWPORT"))
+        if not viewports:
+            continue
+        main = next((v for v in viewports if v.dxf.get("id") == 1), viewports[0])
+        if main.dxf.get("status", 1) == -1:
+            main.dxf.status = 1
+        stack = max([int(v.dxf.get("status", 0)) for v in viewports] + [1])
+        for viewport in viewports:
+            if viewport is not main and viewport.dxf.get("status", 0) == -1:
+                stack += 1
+                viewport.dxf.status = stack
+                woken += 1
+    return woken
+
+
 def _config(mode: str):
     from ezdxf.addons.drawing.config import BackgroundPolicy, ColorPolicy, Configuration
 

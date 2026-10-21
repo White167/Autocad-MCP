@@ -7018,6 +7018,10 @@ async def viewport_create(
             "made by itself); their handles come back in `removed`.",
         ),
     ] = False,
+    layer: Annotated[
+        str | None,
+        Field(default=None, description="Layer for the viewport frame; Defpoints never plots."),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Place a scaled model-space viewport on a paper-space layout.
@@ -7041,6 +7045,7 @@ async def viewport_create(
         view_center_y,
         scale,
         remove_others=remove_others,
+        layer=layer,
     )
 
 
@@ -8080,6 +8085,10 @@ async def page_setup_apply(
         "[top, bottom, left, right] in mm. Headless only: AutoCAD takes margins from the .pc3.",
     ] = None,
     center: Annotated[bool, "Centre the plot on the paper."] = True,
+    full_bleed: Annotated[
+        bool,
+        "Borderless media (ISO_full_bleed_A3_...): a sheet drawn edge to edge prints unclipped.",
+    ] = False,
     ctx: Context = None,
 ) -> dict:
     """AutoCAD's PAGESETUP as one call, on both engines.
@@ -8102,7 +8111,15 @@ async def page_setup_apply(
 
     try:
         setup = resolve_page_setup(
-            paper, orientation, plot_style, scale, plot_area, device, margins_mm, center
+            paper,
+            orientation,
+            plot_style,
+            scale,
+            plot_area,
+            device,
+            margins_mm,
+            center,
+            full_bleed=full_bleed,
         )
         await ctx.info(f"Applying page setup {setup['paper']} {orientation} to {layout}")
         return await _backend(ctx).page_setup_apply(layout, setup)
@@ -12242,6 +12259,13 @@ async def spds_sheet(
         Field(default=None, min_length=2, max_length=2, description="Sheet lower-left corner."),
     ] = None,
     scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    page_setup: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="On a layout: set its page setup to this format, borderless, 1:1.",
+        ),
+    ] = True,
     ctx: Context = None,
 ) -> dict:
     """The outer sheet line, the frame (20 mm filing margin, 5 mm elsewhere) and
@@ -12255,9 +12279,13 @@ async def spds_sheet(
     sheet only - leave it out on the others. Returns the frame box (for
     `drawing_digest(frame=...)`) and the stamp origin; the handles only as a
     count. A4 is portrait only; other formats are refused with the list.
+    On a layout (at the origin, scale 1) the layout's page setup becomes this
+    format on the borderless "DWG To PDF" media, 1:1, plotted from the
+    layout's origin, so the PDF is the sheet; `page_setup` reports it.
     """
     from engineering.sheet.frames import enter_layout
     from engineering.spds.sheet import sheet_prims
+    from engineering.standards.papers import resolve_page_setup
 
     try:
         sheet = sheet_prims(
@@ -12280,6 +12308,30 @@ async def spds_sheet(
     finally:
         if layout is not None:
             await backend.layout_set_current(previous)
+    # Without this the layout keeps AutoCAD's default page setup: on AutoCAD
+    # 2024 (24.3) the PDF of an A3 sheet came out A4 and clipped, and plain
+    # ISO A3 media still clips 17/17/5/5 mm of an edge-to-edge sheet.
+    plot = None
+    if layout is not None and page_setup:
+        if o != (0.0, 0.0) or float(scale) != 1.0:
+            plot = {"ok": False, "skipped": "the sheet is not at the layout origin at 1:1"}
+        else:
+            try:
+                setup = resolve_page_setup(
+                    f"ISO_{sheet['format']}",
+                    sheet["orientation"],
+                    scale="1:1",
+                    plot_area="layout",
+                    full_bleed=True,
+                )
+                applied = await backend.page_setup_apply(layout, setup)
+                plot = {
+                    "ok": bool(applied.get("ok", True)),
+                    "media": setup["canonical_media_name"],
+                    "scale": "1:1",
+                }
+            except Exception as exc:  # the sheet stands; the plot setup is reported
+                plot = {"ok": False, "error": str(exc)[:300]}
     fl, fb, fr, ft = sheet["frame"]
     k = float(scale)
     return {
@@ -12295,6 +12347,7 @@ async def spds_sheet(
             o[1] + sheet["stamp_origin"][1] * k,
         ],
         "fitted": [f for f in sheet["fitted"] if f["width_factor"] < 1.0],
+        **({"page_setup": plot} if plot is not None else {}),
     }
 
 
@@ -12618,6 +12671,12 @@ async def spds_soil_hatch(
     from engineering.spds.draw import Circ, Txt, ensure_resources
     from engineering.spds.standards import SAND_GRADES, SOILS
 
+    async def _spds_measurement(backend) -> int:
+        try:
+            return int(await backend.system_get_variable("MEASUREMENT"))
+        except Exception:  # unreadable: assume the metric file, as before
+            return 1
+
     key = soil.strip().lower()
     if key not in SOILS:
         raise ToolError(f"spds_soil_hatch: soil {soil!r} is not tabulated; have {', '.join(SOILS)}")
@@ -12635,10 +12694,15 @@ async def spds_soil_hatch(
     sp = float(spacing or default_spacing)
     backend = _backend(ctx)
     await ensure_resources(backend, ["Штриховка", "Текст"], text_style=letter is not None)
+    # `base` is the pattern's spacing in acadiso.pat. Both engines take the
+    # definition from acad.pat (inches: 1/25.4 of it) while MEASUREMENT is 0,
+    # which a drawing from acad.dwt has - measured on AutoCAD 2024: the hatch
+    # came out 25.4x too dense, a near-solid band. spds_setup sets 1.
+    imperial = await _spds_measurement(backend) == 0
     hatch = await backend.entity_create_hatch(
         pattern,
         [list(p[:2]) for p in boundary],
-        scale=sp * float(scale) / base,
+        scale=sp * float(scale) / (base / 25.4 if imperial else base),
         angle=angle,
         layer="Штриховка",
     )
@@ -12649,6 +12713,7 @@ async def spds_soil_hatch(
         "angle": angle,
         "spacing_mm": sp,
         "sign": note,
+        "pattern_file": "acad.pat (MEASUREMENT 0)" if imperial else "acadiso.pat",
     }
     if letter is not None and label_at is not None:
         k = float(scale)

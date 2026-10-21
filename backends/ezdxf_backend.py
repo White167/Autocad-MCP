@@ -2965,6 +2965,7 @@ class EzdxfBackend(AutoCADBackend):
         view_center_y: float,
         scale: float = 1.0,
         remove_others: bool = False,
+        layer: str | None = None,
     ) -> dict:
         def _sync():
             doc = self._require_doc()
@@ -2980,6 +2981,10 @@ class EzdxfBackend(AutoCADBackend):
                 view_center_point=(view_center_x, view_center_y),
                 view_height=view_height,
             )
+            if layer:
+                if not doc.layers.has_entry(layer):
+                    doc.layers.add(layer)
+                viewport.dxf.layer = layer
             removed: list[str] = []
             if remove_others:
                 main = target.main_viewport()
@@ -4230,7 +4235,9 @@ class EzdxfBackend(AutoCADBackend):
             # the unturned ones), instead of silently swapping to the media's
             # portrait margins with nothing in ``changed``.
             margins = resolved["margins_mm"]
-            if margins is None:
+            if margins is None and resolved.get("full_bleed"):
+                margins = [0.0, 0.0, 0.0, 0.0]  # borderless media: the whole sheet prints
+            elif margins is None:
                 margins = self._stored_sheet(dxf)[1]  # turned, un-rounded
             dxf.page_setup_name = ""
             dxf.plot_configuration_file = resolved["device"]

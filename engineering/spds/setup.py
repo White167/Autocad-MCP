@@ -19,6 +19,9 @@ __all__ = ["SETUP_VARIABLES", "spds_setup"]
 #: The skill's ``spds:setup`` system variables.
 SETUP_VARIABLES = {
     "INSUNITS": 4,  # millimetres
+    # Metric hatch patterns and linetypes (acadiso.pat / acadiso.lin). A
+    # drawing started from acad.dwt has 0 and hatches 25.4x too densely.
+    "MEASUREMENT": 1,
     "LUNITS": 2,  # decimal
     "LWDISPLAY": 1,
     "LTSCALE": 1.0,

@@ -211,17 +211,20 @@ async def main(args: argparse.Namespace) -> int:
         from engineering.standards.papers import resolve_page_setup
         from engineering.standards.plot import batch_plot
 
+        # The first paper tab: "Layout1" on an English seat, "Лист1" on a
+        # Russian one (AutoCAD 2024 рус. refused the hard-coded English name).
+        sheet = next(n for n in (await backend.layout_list())["layouts"] if n != "Model")
         applied = await backend.page_setup_apply(
-            "Layout1", resolve_page_setup("ISO_A3", orientation="landscape", scale="1:1")
+            sheet, resolve_page_setup("ISO_A3", orientation="landscape", scale="1:1")
         )
-        listed = (await backend.page_setup_list("Layout1"))[0]
+        listed = (await backend.page_setup_list(sheet))[0]
         _check(
             failures,
             "page_setup_list says 420 x 297",
             tuple(float(v) for v in listed["size_mm"]) == A3_LANDSCAPE_MM,
         )
         out_dir = Path(tempfile.mkdtemp(prefix="acadmcp_settings_smoke_"))
-        plotted = await batch_plot(backend, ["Layout1"], str(out_dir), "{drawing}-{layout}.pdf")
+        plotted = await batch_plot(backend, [sheet], str(out_dir), "{drawing}-{layout}.pdf")
         pdf_row = plotted["sheets"][0]
         width_mm, height_mm = (float(v) for v in pdf_row["mediabox_mm"])
         _check(

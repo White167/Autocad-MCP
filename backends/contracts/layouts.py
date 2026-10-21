@@ -79,6 +79,7 @@ class LayoutContract(ABC):
         view_center_y: float,
         scale: float = 1.0,
         remove_others: bool = False,
+        layer: str | None = None,
     ) -> dict:
         """Place a scaled model-space viewport on a paper-space layout.
 
@@ -87,6 +88,10 @@ class LayoutContract(ABC):
         sits over the new one and shows the wrong area - and reports their
         handles in ``removed``. The layout's own paper-space viewport is never
         touched.
+
+        ``layer`` puts the viewport (its frame) on that layer, created when
+        missing - ``Defpoints`` for a frame that never plots. None keeps the
+        current layer, as before.
 
         ``scale`` is paper:model (1.0 = 1:1, 0.5 = 1:2). The viewport shows
         the model window centered at (view_center_x, view_center_y) with

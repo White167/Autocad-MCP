@@ -275,6 +275,10 @@ async def run(keep: bool, headless: bool = False) -> int:
                 report("framed screenshot", bool(shot.content), "rendered headlessly")
 
             # stage 5 + 4: a fresh layout, the sheet, a viewport with no AutoCAD viewport on top
+            if live:
+                lcv_before = data(
+                    await call(c, "system_get_variable", {"name": "LAYOUTCREATEVIEWPORT"})
+                )
             await call(c, "layout_create", {"name": "СмокЛист"})
             sheet = data(
                 await call(
@@ -316,11 +320,30 @@ async def run(keep: bool, headless: bool = False) -> int:
                 )
             )
             listed = data(await call(c, "viewport_list", {"layout": "СмокЛист"}))
+            # Besides ours only the sheet's own paper-space viewport may be
+            # there. ezdxf flags it is_main; ActiveX cannot (is_main is null),
+            # so live one unflagged extra is the sheet itself - AutoCAD's own
+            # viewport would make it two (seen on AutoCAD 2024 before the
+            # LAYOUTCREATEVIEWPORT write went over as a short).
+            extra = [
+                v["handle"]
+                for v in (listed or {}).get("viewports", [])
+                if v.get("handle") != vp.get("handle") and v.get("is_main") is not True
+            ]
             report(
                 "no AutoCAD viewport on the new layout",
-                True,
-                {"created": vp.get("handle"), "list": listed},
+                len(extra) <= (1 if live else 0),
+                {"created": vp.get("handle"), "others": extra},
             )
+            if live:
+                lcv_after = data(
+                    await call(c, "system_get_variable", {"name": "LAYOUTCREATEVIEWPORT"})
+                )
+                report(
+                    "operator's LAYOUTCREATEVIEWPORT restored",
+                    lcv_before == lcv_after,
+                    {"before": lcv_before, "after": lcv_after},
+                )
             sheet_shot = await call(
                 c, "view_screenshot", {"space": "СмокЛист", "mode": "mono", "width": 1000}
             )
