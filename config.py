@@ -112,6 +112,16 @@ class Settings:
         # list ("core,pid,settings") advertises only those. core cannot be disabled.
         self.tool_packs: str = os.environ.get("TOOL_PACKS", "all").lower().strip()
 
+        # Tool config: a .toml path or a bundled preset name (spds, drafting,
+        # review - discovery/profiles/). Its keys win over TOOL_PROFILE /
+        # TOOL_PACKS; an unreadable config falls back to them with a warning.
+        self.tool_config: str = os.environ.get("TOOL_CONFIG", "").strip()
+
+        # Tool listing: "full" (default) or "short" (summary-line descriptions
+        # and compacted schemas, discovery/compact.py). A tool config's
+        # `descriptions` key wins over this.
+        self.tool_descriptions: str = os.environ.get("TOOL_DESCRIPTIONS", "full").lower().strip()
+
         # Tool discovery: "off" (default) advertises the full catalog; "search"
         # replaces it with a search tool plus a call_tool proxy (see
         # discovery/transform.py and server._apply_discovery_mode).

@@ -1,0 +1,7 @@
+# General 2D drafting: the core surface without the gear / keyway / GD&T tools
+# and without the vertical packs, listed in the short form.
+description = "General 2D drafting: core without gear, keyway, GD&T or vertical packs."
+base = "full"
+packs = ["core"]
+exclude_groups = ["gear", "gdt"]
+descriptions = "short"

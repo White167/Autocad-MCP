@@ -76,8 +76,111 @@ __all__ = [
 ACAD_MATCH_BOOST = 1.0
 SYNONYM_MATCH_BOOST = 0.5
 
-_WORD_RE = re.compile(r"[a-z0-9]+")
+# Letters and digits of any script: the corpus carries Russian and Turkish
+# phrases, and an ASCII-only pattern silently turned every one of them into an
+# empty word list - a synonym that could never match (v1.6 shipped that way).
+_WORD_RE = re.compile(r"[^\W_]+")
 _RAW_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+
+#: A Cyrillic word is cut to this many letters after its ending goes (see
+#: _fold_word) - a crude stem, but enough that "отметка" / "отметку" /
+#: "отметки" are one word. Russian inflects the ending; the first five letters
+#: are the root for the drafting nouns the corpus carries.
+CYRILLIC_STEM = 5
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04ff]")
+
+
+_RUSSIAN_ENDING = frozenset("аеиоуыэюяйь")
+
+
+def _fold_word(word: str) -> str:
+    """A Cyrillic word's crude stem: up to two final vowels / й / ь off, then five letters.
+
+    "линия" and "линии" both become "лин"; "отметка" and "отметку" "отмет";
+    "размерный" and "размер" "разме". Never shorter than three letters. Other
+    words pass through unchanged.
+    """
+    if word.isascii():
+        return word
+    word = word.replace("ё", "е")
+    if _CYRILLIC_RE.search(word):
+        for _ in range(2):
+            if len(word) > 3 and word[-1] in _RUSSIAN_ENDING:
+                word = word[:-1]
+        word = word[:CYRILLIC_STEM]
+    return word
+
+
+#: Russian words that carry no tool: request verbs ("сделай", "нарисуй") and
+#: prepositions, as folded stems. Without this the verb in "сделать скриншот"
+#: pulls the one tool whose synonym also starts "сделать" - the request, not
+#: the object, decides the hit. Dropped from queries, synonyms and the index.
+_RUSSIAN_STOP = frozenset(
+    {
+        "сдела",
+        "сдел",
+        "созд",
+        "созда",
+        "добав",
+        "нарис",
+        "начер",
+        "поста",
+        "прове",
+        "выпол",
+        "нужн",
+        "над",
+        "пожал",
+        "можн",
+        "по",
+        "на",
+        "из",
+        "от",
+        "до",
+        "за",
+        "со",
+        "во",
+        "не",
+        "для",
+        "все",
+        "его",
+        "это",
+        "под",
+        "при",
+        "без",
+    }
+)
+
+
+def _index_text(text: str) -> str:
+    """``text`` as the stock BM25 tokenizer can index it.
+
+    That tokenizer splits on ``[^a-z0-9]``, so a non-ASCII word would vanish;
+    each one is folded (:func:`_fold_word`) and spelled as an ASCII token that
+    cannot collide with an English word.
+    """
+    return " ".join(
+        w if w.isascii() else "u" + w.encode("utf-8").hex()
+        for w in _words(text)
+        if w.isascii() or (len(w) > 1 and w not in _RUSSIAN_STOP)
+    )
+
+
+def _folding_index(base: type) -> type:
+    """``base`` (the stock BM25 index class) reading documents and queries through _index_text."""
+    if getattr(base, "_folds_text", False):
+        return base
+
+    class FoldingBM25Index(base):  # type: ignore[misc, valid-type]
+        _folds_text = True
+
+        def build(self, documents):
+            super().build([_index_text(doc) for doc in documents])
+
+        def query(self, text, top_k):
+            return super().query(_index_text(text), top_k)
+
+    return FoldingBM25Index
+
 
 # Dropped from both sides before phrase matching, so the synonym "delete a
 # layer" still matches "delete the layer called GEOMETRY". Articles only —
@@ -92,11 +195,16 @@ def _words(text: str) -> list[str]:
     index and wrong for phrase matching: dropping the "a" out of "round the
     corner" would silently change which phrases can match.
     """
-    return _WORD_RE.findall(text.lower())
+    return [_fold_word(word) for word in _WORD_RE.findall(text.lower())]
 
 
 def _phrase_words(text: str) -> list[str]:
-    return [word for word in _words(text) if word not in _ARTICLES]
+    return [
+        word
+        for word in _words(text)
+        if word not in _ARTICLES
+        and (word.isascii() or (len(word) > 1 and word not in _RUSSIAN_STOP))
+    ]
 
 
 def _names_a_command(query: str, command: str) -> bool:
@@ -237,6 +345,7 @@ class CadSearchTransform(BM25SearchTransform):
         )
         self._bm25_k1 = self._index.k1
         self._bm25_b = bm25_b
+        self._index = _folding_index(type(self._index))(self._bm25_k1, bm25_b)
 
     # ------------------------------------------------------------------
     # Indexed document

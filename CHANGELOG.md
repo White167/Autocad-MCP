@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The first stage of the token-economy roadmap
+(`docs/plans/token-economy-roadmap.md`): a client pays for the tools it uses,
+and for less text per tool. Measured with `benchmarks/token_suite.py` on the
+model-visible listing (name + description + input schema, `prompt_chars`):
+the default surface is ≈ 57,400 tokens, the bundled `spds` profile is
+≈ 6,000.
+
+### Added
+
+- **`TOOL_CONFIG`**: a `.toml` file, or one of the bundled presets in
+  `discovery/profiles/` (`spds`, `drafting`, `review`). It sets `base`,
+  `packs`, `exclude_groups` (by tag), `exclude`, `include`, `costs`,
+  `descriptions`, `discovery` and `pinned`. A key the file sets wins over
+  `TOOL_PROFILE` / `TOOL_PACKS` / `TOOL_DESCRIPTIONS` / `DISCOVERY_MODE`.
+  `include` never lifts the `ENABLE_3D` gate. A config that cannot be read
+  does not block startup: the server serves the environment's surface and
+  reports the error in `system_about.tool_profile.tool_config`. Names the
+  config gives that match no tool are reported as `unmatched`.
+- **`TOOL_DESCRIPTIONS=short`** (`discovery/compact.py`). Each tool is listed
+  by its `@cad_tool` summary. Parameter notes are cut to their first sentence,
+  at most 90 characters, and the conventional parameters (coordinates,
+  `handle`, `layer`, `color`, `linetype`) lose theirs, because the instructions
+  now state the convention once. `anyOf`-with-`null` collapses and
+  `additionalProperties: false` is dropped. Types, enums, bounds, defaults and
+  `required` are untouched; the transform rewrites only the listing, so every
+  call is still validated by the registered schema. The server instructions
+  switch to a short, discipline-neutral text. This mode halves the
+  model-visible listing: 57.4k → 28.5k tokens on the default surface.
+- **`tool_help(name)`** (SECTION 11, lean): the full docstring and input schema
+  behind a short summary. An unknown name answers with the nearest tool names.
+- **`DISCOVERY_MODE=hybrid`** (and `discovery = "hybrid"` in a tool config).
+  The pinned tools stay listed (by default the lean set); the rest of the
+  enabled surface is reached through `search_tools` / `call_tool`. A tool the
+  profile disables is neither listed nor found.
+- Russian search vocabulary for about 80 drafting tools.
+- `benchmarks/token_suite.py` idle lane: rows for the short listing and the
+  three presets.
+
+### Changed
+
+- **Packs `gear` and `gdt`.** `gear_draw_*` / `keyway_draw_*` and `gd_frame` /
+  `datum_feature` left `core`. `TOOL_PACKS=core` now hides them; a mechanical
+  client asks for `core,mech,gear,gdt`. `drawing_finalize` stays core.
+- 248 registered tools (`tool_help`); lean is 66.
+
+### Fixed
+
+- **Non-ASCII search terms never matched.** The stock BM25 tokenizer and the
+  phrase matcher both split on `[a-z0-9]`. Every Russian and Turkish synonym in
+  v1.6 (`кабельная ведомость`, `kablo metrajı`, …) therefore became an empty
+  word list and was dead data. Words are now Unicode. A non-ASCII word is
+  indexed as an ASCII token that cannot collide with English, and a Cyrillic
+  word is folded to a crude stem (up to two final vowels / `й` / `ь` off, then
+  five letters), so `отметка` / `отметку` match. English queries rank exactly
+  as before.
+
 ## [1.6.0] — 2026-09-25
 
 The v1.6 roadmap, shipped as five tracks: 154 → 247 registered tools in 28

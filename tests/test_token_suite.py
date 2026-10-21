@@ -161,13 +161,25 @@ def test_the_cache_arithmetic_follows_the_published_multipliers():
 # -- lane 1: idle cost ------------------------------------------------------
 
 
-def test_the_idle_lane_covers_the_five_advertised_surfaces(report):
-    """Default, lean, search - and the two single-vertical clients:
-    TOOL_PACKS=core,mech (the default surface minus exactly the pid, settings,
-    arch and plant packs) and TOOL_PACKS=core,arch (minus pid, settings, mech
-    and plant)."""
+def test_the_idle_lane_covers_the_advertised_surfaces(report):
+    """Default, lean, search - the two single-vertical clients:
+    TOOL_PACKS=core,mech,gear,gdt (the default surface minus exactly the pid,
+    settings, arch and plant packs) and TOOL_PACKS=core,arch (minus pid,
+    settings, mech, plant, gear and gdt) - and, from v1.7, the short listing
+    and the three bundled tool configs."""
     variants = {row["variant"]: row for row in report["idle"]}
-    assert set(variants) == {"default", "lean", "packs_core_mech", "packs_core_arch", "search"}
+    assert set(variants) == {
+        "default",
+        "lean",
+        "packs_core_mech",
+        "packs_core_arch",
+        "default_short",
+        "lean_short",
+        "preset_spds",
+        "preset_drafting",
+        "preset_review",
+        "search",
+    }
     assert variants["default"]["advertised_tools"] > 100
     assert variants["lean"]["advertised_tools"] == len(server.LEAN_TOOL_NAMES)
     assert variants["search"]["advertised_tools"] == 2
@@ -185,6 +197,8 @@ def test_the_idle_lane_covers_the_five_advertised_surfaces(report):
         - len(packs["settings"])
         - len(packs["mech"])
         - len(packs["plant"])
+        - len(packs["gear"])
+        - len(packs["gdt"])
     )
     for narrowed in ("packs_core_mech", "packs_core_arch"):
         assert (
@@ -193,6 +207,14 @@ def test_the_idle_lane_covers_the_five_advertised_surfaces(report):
             > variants["lean"]["chars"]
             > variants["search"]["chars"]
         )
+    # The short listing hides no tool, it only says less about each one.
+    for full, short in (("default", "default_short"), ("lean", "lean_short")):
+        assert variants[short]["advertised_tools"] == variants[full]["advertised_tools"]
+        assert variants[short]["prompt_chars"] < 0.6 * variants[full]["prompt_chars"]
+    assert (
+        variants["preset_spds"]["advertised_tools"]
+        < variants["packs_core_arch"]["advertised_tools"]
+    )
 
 
 def test_the_idle_lane_separates_the_wire_payload_from_what_the_model_pays(report):

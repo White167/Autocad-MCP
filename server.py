@@ -298,6 +298,8 @@ Set AUTOCAD_MCP_BACKEND=com|ezdxf|auto environment variable to force a backend.
 """,
     lifespan=autocad_lifespan,
 )
+#: Restored when a short listing (discovery/compact.py) is switched back off.
+_FULL_INSTRUCTIONS = mcp.instructions
 
 mcp.add_middleware(ErrorHandlingMiddleware())
 mcp.add_middleware(AuditMiddleware())
@@ -322,13 +324,18 @@ mcp.add_middleware(CapabilityRefusalMiddleware())
 # Tool *counts* are unaffected: system_status / system_about / _tool_groups /
 # _apply_tool_profile all read the untransformed registry (_registered_tools).
 
-DISCOVERY_MODES = ("off", "search")
+DISCOVERY_MODES = ("off", "search", "hybrid")
 
 _discovery_transform = None
 
 
-def _apply_discovery_mode(mode: str | None = None) -> str:
+def _apply_discovery_mode(mode: str | None = None, pinned: set[str] | None = None) -> str:
     """Attach or detach the tool-search transform. Returns the mode applied.
+
+    ``hybrid`` (v1.7) is ``search`` with ``pinned`` tools still listed whole:
+    a client sees its everyday tools as usual and reaches the rest of the
+    enabled surface through search_tools / call_tool. Without ``pinned`` it
+    pins the lean set.
 
     Idempotent: re-applying removes the previous transform first, so a mode
     switch never stacks two search interfaces on one server.
@@ -348,18 +355,27 @@ def _apply_discovery_mode(mode: str | None = None) -> str:
         except (AttributeError, ValueError) as exc:  # pragma: no cover - layout change
             log.debug("Could not detach the discovery transform: %s", exc)
         _discovery_transform = None
-    if selected == "search":
+    if selected in ("search", "hybrid"):
         # Imported lazily so "off" never pays for it, matching how the backend
         # modules are kept out of import time.
         from discovery.transform import CadSearchTransform
 
-        _discovery_transform = CadSearchTransform()
+        always = None
+        if selected == "hybrid":
+            always = sorted(pinned if pinned is not None else LEAN_TOOL_NAMES)
+        _discovery_transform = CadSearchTransform(always_visible=always)
         mcp.add_transform(_discovery_transform)
-        log.info("Tool discovery: search transform attached (clients see search_tools/call_tool)")
+        log.info(
+            "Tool discovery: %s transform attached (clients see search_tools/call_tool%s)",
+            selected,
+            f" + {len(always)} pinned" if always else "",
+        )
     return selected
 
 
-_apply_discovery_mode()
+# hybrid pins tools by name, so it waits for _apply_tool_profile (the lifespan),
+# which knows the enabled surface; until then nothing has listed anything.
+_apply_discovery_mode("off" if config.settings.discovery_mode == "hybrid" else None)
 
 
 # ---------------------------------------------------------------------------
@@ -934,6 +950,9 @@ LEAN_TOOL_NAMES = frozenset(
         "system_status",
         "system_about",
         "system_capabilities",
+        # The short listing (TOOL_DESCRIPTIONS=short) points here for a tool's
+        # full docstring, so a lean client must be able to reach it.
+        "tool_help",
         # batching — the profile exists for clients with tight tool caps, which
         # are exactly the clients paying the most per turn. Measured, the big
         # lever is turn elimination (9.07x), so a lean surface without cad_batch
@@ -996,8 +1015,23 @@ SOLID_TOOL_NAMES = frozenset(
 # mechanically should not pay for the P&ID surface, and a client that never
 # talks to a live seat should not pay for the environment surface. Styles and
 # page setup (SECTION 18/19) are drafting essentials and stay in core.
-TOOL_PACK_NAMES = ("core", "pid", "settings", "mech", "arch", "plant")
+TOOL_PACK_NAMES = ("core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt")
 PACK_TOOL_NAMES: dict[str, frozenset[str]] = {
+    # SECTION 12's parametric gear and keyway views (v1.7). Mechanical-only
+    # primitives that a construction or general drafting client never calls;
+    # drawing_finalize, the validator every discipline ends with, stays core.
+    "gear": frozenset(
+        {
+            "gear_draw_helical_front_view",
+            "gear_draw_spur_front_view",
+            "gear_draw_section_aa",
+            "keyway_draw_keyed_bore",
+            "keyway_draw_section",
+        }
+    ),
+    # SECTION 14's ISO 1101 / ASME Y14.5 symbols (v1.7): feature control frames
+    # and datum features, mechanical tolerancing only.
+    "gdt": frozenset({"gd_frame", "datum_feature"}),
     "pid": frozenset(
         {
             "pid_symbol_list",
@@ -1092,17 +1126,19 @@ _active_tool_profile: dict | None = None
 #: The Visibility transforms the last _apply_tool_profile added, detached before
 #: the next one is applied.
 _profile_transforms: list = []
+#: The short-listing transform (discovery/compact.py) while descriptions="short".
+_compact_transform = None
 
 
-def _enabled_packs() -> tuple[set[str], list[str]]:
-    """Resolve TOOL_PACKS into (enabled packs, ignored unknown entries).
+def _enabled_packs(raw: str | None = None) -> tuple[set[str], list[str]]:
+    """Resolve TOOL_PACKS (or a tool config's ``packs``) into (enabled, ignored).
 
     ``all`` (or an empty value) enables every pack; a comma list enables the
     named packs on top of ``core``, which can never be dropped. Unknown names
     are ignored with a warning rather than failing startup.
     """
-    raw = (config.settings.tool_packs or "all").lower()
-    requested = [p.strip() for p in raw.split(",") if p.strip()]
+    raw = (config.settings.tool_packs if raw is None else raw) or "all"
+    requested = [p.strip() for p in raw.lower().split(",") if p.strip()]
     if not requested or "all" in requested:
         return set(TOOL_PACK_NAMES), []
     enabled = {"core"}
@@ -1120,19 +1156,125 @@ def _enabled_packs() -> tuple[set[str], list[str]]:
     return enabled, ignored
 
 
-def _profile_enabled_names(profile: str, registered: set[str]) -> set[str]:
-    packs, _ignored = _enabled_packs()
+def _load_tool_config():
+    """Parse TOOL_CONFIG; an unreadable one is reported, never fatal."""
+    from discovery.profiles import ToolConfig, ToolConfigError, load_tool_config
+
+    try:
+        return load_tool_config(config.settings.tool_config), None
+    except ToolConfigError as exc:
+        log.warning("%s - serving the TOOL_PROFILE / TOOL_PACKS surface instead.", exc)
+        return ToolConfig(), str(exc)
+
+
+def _profile_enabled_names(
+    profile: str,
+    registered: set[str] | dict,
+    tool_config=None,
+    packs_raw: str | None = None,
+) -> tuple[set[str], dict]:
+    """The names a profile advertises, plus what the tool config could not match.
+
+    ``registered`` maps a name to its tool (tags and ``@cad_tool`` cost are read
+    from it); a bare set of names is accepted when no config filters by tag/cost.
+    """
+    tools = registered if isinstance(registered, dict) else dict.fromkeys(registered)
+    packs, _ignored = _enabled_packs(packs_raw)
     hidden_by_pack: set[str] = set().union(
         *(names for pack, names in PACK_TOOL_NAMES.items() if pack not in packs)
     )
-    enabled = set(registered) - hidden_by_pack
+    enabled = set(tools) - hidden_by_pack
     if profile == "lean":
         enabled &= LEAN_TOOL_NAMES
+    unmatched: dict[str, list[str]] = {}
+    if tool_config is not None and not tool_config.is_empty:
+        groups = set(tool_config.exclude_groups)
+        if groups:
+            enabled = {
+                n for n in enabled if not (set(getattr(tools[n], "tags", None) or ()) & groups)
+            }
+        if tool_config.costs is not None:
+            keep = set(tool_config.costs)
+            enabled = {
+                n
+                for n in enabled
+                if ((getattr(tools[n], "meta", None) or {}).get("cad") or {}).get("cost") in keep
+            }
+        enabled -= set(tool_config.exclude)
+        enabled |= {n for n in tool_config.include if n in tools}
+        for key in ("exclude", "include"):
+            missing = sorted(n for n in getattr(tool_config, key) if n not in tools)
+            if missing:
+                unmatched[key] = missing
+                log.warning("TOOL_CONFIG %s names no registered tool: %s", key, ", ".join(missing))
     if not config.settings.enable_3d:
         # Capability-aware discovery: don't advertise opt-in 3D tools that
-        # would only reject the call.
+        # would only reject the call - not even when a tool config includes one.
         enabled -= SOLID_TOOL_NAMES
-    return enabled
+    return enabled, unmatched
+
+
+def _apply_description_mode(mode: str) -> str:
+    """Attach or detach the short-listing transform. Returns the mode applied."""
+    global _compact_transform
+    from discovery.profiles import DESCRIPTION_MODES
+
+    selected = (mode or "full").lower().strip()
+    if selected not in DESCRIPTION_MODES:
+        log.warning(
+            "Unknown TOOL_DESCRIPTIONS %r - falling back to 'full'. Valid modes: %s.",
+            selected,
+            ", ".join(DESCRIPTION_MODES),
+        )
+        selected = "full"
+    if _compact_transform is not None:
+        try:
+            mcp._transforms.remove(_compact_transform)
+        except (AttributeError, ValueError) as exc:  # pragma: no cover - layout change
+            log.debug("Could not detach the short-listing transform: %s", exc)
+        _compact_transform = None
+    if selected == "short":
+        from discovery.compact import SHORT_INSTRUCTIONS, make_compact_transform
+
+        _compact_transform = make_compact_transform()
+        mcp.add_transform(_compact_transform)
+        mcp.instructions = SHORT_INSTRUCTIONS
+    else:
+        mcp.instructions = _FULL_INSTRUCTIONS
+    return selected
+
+
+#: True while the discovery transform is the one a profile asked for, so the
+#: next profile without a ``discovery`` key restores DISCOVERY_MODE's.
+_discovery_by_profile = False
+
+
+def _apply_profile_discovery(tool_config, enabled: set[str]) -> dict | None:
+    """Apply a tool config's ``discovery`` / ``pinned`` (or DISCOVERY_MODE=hybrid).
+
+    Returns the block system_about shows, or ``None`` when the profile leaves
+    the discovery mode alone.
+    """
+    global _discovery_by_profile
+    mode = tool_config.discovery or (
+        "hybrid" if config.settings.discovery_mode == "hybrid" else None
+    )
+    if mode is None:
+        if _discovery_by_profile:
+            _apply_discovery_mode()
+            _discovery_by_profile = False
+        return None
+    pinned = None
+    if mode == "hybrid":
+        wanted = set(tool_config.pinned) if tool_config.pinned else set(LEAN_TOOL_NAMES)
+        pinned = wanted & enabled
+    applied = _apply_discovery_mode(mode, pinned=pinned)
+    _discovery_by_profile = True
+    block: dict = {"mode": applied}
+    if pinned is not None:
+        block["pinned_count"] = len(pinned)
+        block["searchable_count"] = len(enabled - pinned)
+    return block
 
 
 async def _apply_tool_profile(profile: str | None = None) -> dict:
@@ -1140,10 +1282,16 @@ async def _apply_tool_profile(profile: str | None = None) -> dict:
 
     Runs in the server lifespan (and directly from tests). Re-applying a
     different profile re-enables previously hidden tools first, so profile
-    switches are idempotent.
+    switches are idempotent. TOOL_CONFIG (discovery/profiles.py) is read here:
+    its ``base`` / ``packs`` / ``descriptions`` win over TOOL_PROFILE /
+    TOOL_PACKS / TOOL_DESCRIPTIONS, and an explicit ``profile`` argument wins
+    over both.
     """
     global _active_tool_profile
-    requested = (profile or config.settings.tool_profile or "full").lower().strip()
+    tool_config, config_error = _load_tool_config()
+    requested = (
+        (profile or tool_config.base or config.settings.tool_profile or "full").lower().strip()
+    )
     selected = requested
     if selected not in TOOL_PROFILES:
         if selected in REMOVED_TOOL_PROFILES:
@@ -1160,9 +1308,12 @@ async def _apply_tool_profile(profile: str | None = None) -> dict:
                 ", ".join(TOOL_PROFILES),
             )
         selected = "full"
-    registered = {tool.name for tool in await _registered_tools() if getattr(tool, "name", None)}
-    enabled = _profile_enabled_names(selected, registered)
-    disabled = sorted(registered - enabled)
+    packs_raw = ",".join(tool_config.packs) if tool_config.packs is not None else None
+    registered = {
+        tool.name: tool for tool in await _registered_tools() if getattr(tool, "name", None)
+    }
+    enabled, unmatched = _profile_enabled_names(selected, registered, tool_config, packs_raw)
+    disabled = sorted(set(registered) - enabled)
     # Replace the previous profile's visibility, never stack on it. fastmcp 3's
     # enable()/disable() append a Visibility transform per call and a tool lookup
     # walks the whole stack as nested calls; the lifespan runs this on every
@@ -1180,28 +1331,43 @@ async def _apply_tool_profile(profile: str | None = None) -> dict:
     if disabled:
         mcp.disable(names=set(disabled))
     _profile_transforms[:] = [t for t in mcp.transforms if not any(t is b for b in before)]
+    descriptions = _apply_description_mode(
+        tool_config.descriptions or config.settings.tool_descriptions or "full"
+    )
+    discovery = _apply_profile_discovery(tool_config, enabled)
     _active_tool_profile = {
         "profile": selected,
         "registered_count": len(registered),
         "enabled_count": len(enabled),
         "disabled_count": len(disabled),
         "disabled_tools": disabled,
+        "descriptions": descriptions,
     }
-    packs, ignored = _enabled_packs()
+    if discovery is not None:
+        _active_tool_profile["discovery"] = discovery
+    packs, ignored = _enabled_packs(packs_raw)
     _active_tool_profile["tool_packs"] = {
         "enabled": sorted(packs),
         "available": list(TOOL_PACK_NAMES),
         "ignored": ignored,
     }
+    if not tool_config.is_empty or config_error:
+        block = tool_config.report() if not tool_config.is_empty else {"source": None}
+        if unmatched:
+            block["unmatched"] = unmatched
+        if config_error:
+            block["error"] = config_error
+        _active_tool_profile["tool_config"] = block
     if requested != selected:
         # Surface the fallback where an MCP client can actually see it: a
         # warning on a STDIO server's stderr is routinely invisible.
         _active_tool_profile["requested"] = requested
     log.info(
-        "Tool profile '%s': %d enabled, %d hidden",
+        "Tool profile '%s': %d enabled, %d hidden, descriptions=%s",
         selected,
         len(enabled),
         len(disabled),
+        descriptions,
     )
     return _active_tool_profile
 
@@ -5200,7 +5366,7 @@ async def transaction_rollback(ctx: Context = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# ── SECTION 11: System (8 tools) ────────────────────────────────────────────
+# ── SECTION 11: System (9 tools) ────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 
 
@@ -5422,6 +5588,48 @@ async def system_run_lisp(
     sanitize_lisp(expression)
     await ctx.warning(f"Running LISP: {expression[:80]}")
     return await _backend(ctx).system_run_lisp(expression)
+
+
+@cad_tool(
+    summary="Full description and parameter schema of one tool (the short listing omits them).",
+    cost="read",
+)
+@mcp.tool(
+    annotations={"title": "Tool Help", "readOnlyHint": True},
+    tags={"system"},
+)
+async def tool_help(
+    name: Annotated[str, "Tool name, e.g. dimension_linear."],
+    ctx: Context = None,
+) -> dict:
+    """The full docstring and input schema of one registered tool.
+
+    With `TOOL_DESCRIPTIONS=short` (or a tool config's `descriptions = "short"`)
+    the listing carries only each tool's summary line and first-sentence
+    parameter notes. Call this before using a tool whose behaviour the summary
+    does not settle - the full text is where its refusals, units and engine
+    differences are written. `enabled: false` says the active profile hides it.
+    An unknown name answers with the nearest registered names.
+    """
+    import difflib
+
+    registered = {t.name: t for t in await _registered_tools() if getattr(t, "name", None)}
+    tool = registered.get(name.strip())
+    if tool is None:
+        near = difflib.get_close_matches(name.strip(), list(registered), n=5, cutoff=0.5)
+        raise ToolError(f"tool_help: no tool named {name!r}. Nearest: {', '.join(near) or 'none'}.")
+    cad = (tool.meta or {}).get("cad") or {}
+    disabled = set((_active_tool_profile or {}).get("disabled_tools") or ())
+    return {
+        "name": tool.name,
+        "enabled": tool.name not in disabled,
+        "summary": cad.get("summary"),
+        "cost": cad.get("cost"),
+        "acad": cad.get("acad") or [],
+        "tags": sorted(tool.tags or ()),
+        "description": tool.description,
+        "parameters": tool.parameters,
+    }
 
 
 @cad_tool(

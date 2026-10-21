@@ -19,9 +19,19 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 
 </div>
 
-> **v1.6 release snapshot:** 247 tools · 8 resources · 5 prompt templates · 4992 collected tests.
-> 247 is the **registered** count; a default install advertises 242 over `tools/list`,
+> **v1.6 release snapshot:** 248 tools · 8 resources · 5 prompt templates · 5031 collected tests.
+> 248 is the **registered** count; a default install advertises 243 over `tools/list`,
 > because `ENABLE_3D` is unset. `system_about` is the runtime authority.
+
+## What's new in 1.7 (unreleased)
+
+**Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 6k tokens of tool listing instead of 57k, and still reaches all 167 tools it enables.
+
+- `TOOL_CONFIG` takes a `.toml` file or a bundled preset (`spds`, `drafting`, `review`). The file can pick packs, drop tools by tag or name, keep only some `@cad_tool` costs, and pin tools ([`discovery/profiles.py`](discovery/profiles.py)).
+- `TOOL_DESCRIPTIONS=short` lists each tool by its summary line, with first-sentence parameter notes, and drops schema boilerplate. No type, enum, bound, default or `required` entry changes, and every call is still validated against the full schema. `tool_help(name)` returns the full text.
+- `DISCOVERY_MODE=hybrid` lists the pinned tools in full and reaches the rest of the enabled surface through `search_tools` / `call_tool`.
+- Gears and keyways moved out of `core` into the `gear` pack, and GD&T into the `gdt` pack.
+- Russian search terms now work. The v1.6 Russian and Turkish synonyms never matched, because the tokenizer split on `[a-z0-9]`. Common drafting requests in Russian now resolve, using a crude Cyrillic stem.
 
 ## What's new in 1.6
 
@@ -74,6 +84,17 @@ Five tracks of one [roadmap](https://github.com/U-C4N/Autocad-MCP/blob/main/docs
 | `TOOL_PACKS=core` (full profile) | 183 | 57,122 tokens |
 | `TOOL_PROFILE=lean` | 65 | 22,661 tokens |
 | `DISCOVERY_MODE=search` | 2 | **356 tokens** |
+
+From 1.7, what the *model* reads matters more than the wire payload: a client forwards each tool's name, description and input schema, not its `_meta` or output schema. On that measure (`prompt_chars` in `benchmarks/token_suite.py`):
+
+| Surface (1.7) | Tools listed | Model-visible listing |
+|---|---:|---:|
+| `TOOL_PROFILE=full` (default) | 243 | ≈ 57,400 tokens |
+| `TOOL_DESCRIPTIONS=short` | 243 | ≈ 28,500 tokens |
+| `TOOL_PROFILE=lean`, `TOOL_DESCRIPTIONS=short` | 66 | ≈ 8,100 tokens |
+| `TOOL_CONFIG=drafting` | 177 | ≈ 18,800 tokens |
+| `TOOL_CONFIG=review` | 70 | ≈ 6,100 tokens |
+| `TOOL_CONFIG=spds` (hybrid: 56 pinned, 111 more by search) | 58 | ≈ 6,000 tokens |
 
 > [!NOTE]
 > These are offline ratio estimates, not tokenizer counts, and they are the *uncached* cost: prompt caching amortises the idle term. `benchmarks/token_suite.py --tokenizer anthropic` counts for real.
@@ -364,15 +385,17 @@ A `.dwt` template is the same case (`dwt_write`): a `.dwt` is a DWG container, s
 Nothing loads a `.env` file — export these, or set them in your MCP client's `env` block.
 
 <details>
-<summary><b>All 17 environment variables</b></summary>
+<summary><b>All 19 environment variables</b></summary>
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `AUTOCAD_MCP_BACKEND` | `auto` | `auto`, `com`, or `ezdxf` |
 | `CAD_PROGID` | `AutoCAD.Application` | COM ProgID the live backend attaches to |
-| `TOOL_PROFILE` | `full` | `lean` (65 curated tools, 55 with `TOOL_PACKS=core`) or `full` |
-| `TOOL_PACKS` | `all` | Vertical packs to advertise: `core,pid,settings,mech,arch,plant` (`core` always on) |
-| `DISCOVERY_MODE` | `off` | `search` replaces the catalog with `search_tools` + `call_tool` |
+| `TOOL_PROFILE` | `full` | `lean` (66 curated tools, 56 with `TOOL_PACKS=core`) or `full` |
+| `TOOL_PACKS` | `all` | Vertical packs to advertise: `core,pid,settings,mech,arch,plant,gear,gdt` (`core` always on) |
+| `TOOL_CONFIG` | *(empty)* | A `.toml` tool config or a preset (`spds`, `drafting`, `review`). Its keys win over the three variables around it |
+| `TOOL_DESCRIPTIONS` | `full` | `short` lists each tool by its summary line with a compacted schema; `tool_help(name)` gives the full text |
+| `DISCOVERY_MODE` | `off` | `search` replaces the catalog with `search_tools` + `call_tool`; `hybrid` keeps the pinned (default: lean) tools listed as well |
 | `ENABLE_3D` | `false` | Expose the opt-in `solid_*` tools (COM) |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `ALLOWED_PATHS` | *(empty)* | Comma-separated absolute paths the server may access |

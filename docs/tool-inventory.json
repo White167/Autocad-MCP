@@ -3,7 +3,7 @@
   "schema_version": 1,
   "package_version": "1.6.0",
   "totals": {
-    "tools": 247,
+    "tools": 248,
     "resources": 8,
     "prompts": 5,
     "groups": 28
@@ -31,7 +31,7 @@
     "sheet": 11,
     "solids": 5,
     "styles": 10,
-    "system": 7,
+    "system": 8,
     "templates": 2,
     "transactions": 3,
     "understanding": 4,
@@ -3183,6 +3183,19 @@
       "annotations": {
         "title": "TitleBlock: ISO A3",
         "destructiveHint": false
+      }
+    },
+    {
+      "name": "tool_help",
+      "group": "system",
+      "cost": "read",
+      "summary": "Full description and parameter schema of one tool (the short listing omits them).",
+      "tags": [
+        "system"
+      ],
+      "annotations": {
+        "title": "Tool Help",
+        "readOnlyHint": true
       }
     },
     {

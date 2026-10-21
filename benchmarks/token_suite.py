@@ -489,6 +489,8 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
     srv = _load_server()
     previous_profile = config.settings.tool_profile
     previous_packs = config.settings.tool_packs
+    previous_descriptions = config.settings.tool_descriptions
+    previous_config = config.settings.tool_config
     rows: list[dict[str, Any]] = []
     try:
         config.settings.tool_profile = "full"
@@ -511,12 +513,12 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
             )
         )
         config.settings.tool_profile = "full"
-        config.settings.tool_packs = "core,mech"
+        config.settings.tool_packs = "core,mech,gear,gdt"
         rows.append(
             await _idle_row(
                 "packs_core_mech",
-                "TOOL_PACKS=core,mech - a mechanical client that never opens a "
-                "P&ID or a live seat.",
+                "TOOL_PACKS=core,mech,gear,gdt - a mechanical client that never opens a "
+                "P&ID or a live seat (gears and GD&T left core in v1.7).",
                 counter,
                 turns,
             )
@@ -532,6 +534,38 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
             )
         )
         config.settings.tool_packs = previous_packs
+        config.settings.tool_descriptions = "short"
+        rows.append(
+            await _idle_row(
+                "default_short",
+                "TOOL_DESCRIPTIONS=short - the default surface listed by summary line "
+                "and compacted schema (discovery/compact.py).",
+                counter,
+                turns,
+            )
+        )
+        config.settings.tool_profile = "lean"
+        rows.append(
+            await _idle_row(
+                "lean_short",
+                "TOOL_PROFILE=lean, TOOL_DESCRIPTIONS=short.",
+                counter,
+                turns,
+            )
+        )
+        config.settings.tool_profile = "full"
+        config.settings.tool_descriptions = previous_descriptions
+        for preset in ("spds", "drafting", "review"):
+            config.settings.tool_config = preset
+            rows.append(
+                await _idle_row(
+                    f"preset_{preset}",
+                    f"TOOL_CONFIG={preset} - the bundled discovery/profiles/{preset}.toml.",
+                    counter,
+                    turns,
+                )
+            )
+        config.settings.tool_config = previous_config
         srv._apply_discovery_mode("search")
         rows.append(
             await _idle_row(
@@ -548,6 +582,8 @@ async def idle_lane(counter: Any, turns: int = SESSION_TURNS) -> list[dict[str, 
         # restored here too, so a failed measurement cannot leave the process
         # on a narrowed surface
         config.settings.tool_packs = previous_packs
+        config.settings.tool_descriptions = previous_descriptions
+        config.settings.tool_config = previous_config
         await srv._apply_tool_profile(previous_profile)
     return rows
 

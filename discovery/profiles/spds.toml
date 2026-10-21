@@ -1,0 +1,56 @@
+# Construction drawings to СПДС (ГОСТ Р 21.101-2020): КЖ, КМ, АР, geology.
+#
+# The 2D drafting core plus layouts, styles and the readers. Out: every
+# vertical pack, the gear / keyway / GD&T tools, and the ISO sheet tools
+# (ISO 5457 frame, ISO 7200 title block, ISO 7573 parts list, ISO 6433
+# balloons) - an СПДС sheet has its own frame and основная надпись.
+description = "СПДС construction drafting: 2D core, layouts, styles, readers; no ISO sheet, no verticals."
+base = "full"
+packs = ["core"]
+exclude_groups = ["gear", "gdt"]
+exclude = [
+    "sheet_frame",
+    "titleblock_apply",
+    "titleblock_apply_iso_a3",
+    "revision_add",
+    "balloon_add",
+    "bom_table",
+    "bom_extract",
+    "drawing_apply_iso_layers",
+    "drawing_template_list",
+    "drawing_template_save",
+    "drawing_scale_check",
+    "hatch_set_gradient",
+]
+# A live seat with the user's own drawings open: switching between them.
+include = ["document_list", "document_activate"]
+descriptions = "short"
+
+# Listed whole: what an СПДС sheet uses on most turns. Everything else the
+# filters above leave enabled is one search_tools call away (call_tool runs it).
+discovery = "hybrid"
+pinned = [
+    # drawing
+    "drawing_new", "drawing_open", "drawing_save", "drawing_save_as", "drawing_info",
+    "drawing_export_pdf", "drawing_undo", "document_list", "document_activate",
+    # geometry
+    "entity_create_line", "entity_create_polyline", "entity_create_rectangle",
+    "entity_create_circle", "entity_create_arc", "entity_create_text",
+    "entity_create_mtext", "entity_create_hatch", "leader_create_mleader",
+    # dimensions
+    "dimension_linear", "dimension_aligned", "dimension_radius", "dimension_diameter",
+    "dimension_angular",
+    # editing
+    "entity_move", "entity_copy", "entity_rotate", "entity_mirror", "entity_offset",
+    "entity_delete", "entity_delete_many", "entity_set_properties", "entity_trim",
+    "entity_extend", "entity_edit_text", "entity_edit_geometry",
+    # reading
+    "entity_list", "entity_get", "analysis_bounding_box", "drawing_critique",
+    # layers, blocks, sheets
+    "layer_create", "layer_list", "layer_set_current", "layer_modify", "block_insert",
+    "layout_create", "layout_set_current", "viewport_create", "viewport_list",
+    "viewport_set_scale", "viewport_lock",
+    # view, batch, system
+    "view_zoom_window", "view_screenshot", "cad_batch", "system_status",
+    "system_run_lisp", "tool_help",
+]

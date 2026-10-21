@@ -180,7 +180,17 @@ LEAN_SETTINGS_ESSENTIALS = {
 }
 
 #: Declaration order - what `tool_packs["available"]` reports.
-ALL_PACKS = ["core", "pid", "settings", "mech", "arch", "plant"]
+GEAR_TOOLS = {
+    "gear_draw_helical_front_view",
+    "gear_draw_spur_front_view",
+    "gear_draw_section_aa",
+    "keyway_draw_keyed_bore",
+    "keyway_draw_section",
+}
+
+GDT_TOOLS = {"gd_frame", "datum_feature"}
+
+ALL_PACKS = ["core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt"]
 #: `tool_packs["enabled"]` is sorted, which is no longer the same list.
 ALL_PACKS_ENABLED = sorted(ALL_PACKS)
 
@@ -193,12 +203,23 @@ async def _restore(monkeypatch):
 
 
 def test_pack_registry_names_real_tools_and_only_them():
-    assert server.TOOL_PACK_NAMES == ("core", "pid", "settings", "mech", "arch", "plant")
+    assert server.TOOL_PACK_NAMES == (
+        "core",
+        "pid",
+        "settings",
+        "mech",
+        "arch",
+        "plant",
+        "gear",
+        "gdt",
+    )
     assert server.PACK_TOOL_NAMES["pid"] == frozenset(PID_TOOLS)
     assert server.PACK_TOOL_NAMES["mech"] == frozenset(MECH_TOOLS)
     assert server.PACK_TOOL_NAMES["settings"] == frozenset(SETTINGS_TOOLS)
     assert server.PACK_TOOL_NAMES["arch"] == frozenset(ARCH_TOOLS)
     assert server.PACK_TOOL_NAMES["plant"] == frozenset(PLANT_TOOLS)
+    assert server.PACK_TOOL_NAMES["gear"] == frozenset(GEAR_TOOLS)
+    assert server.PACK_TOOL_NAMES["gdt"] == frozenset(GDT_TOOLS)
     assert len(SETTINGS_TOOLS) == 22
     assert len(MECH_TOOLS) == 14
     assert len(ARCH_TOOLS) == 12
@@ -234,6 +255,8 @@ async def test_core_only_hides_pid_and_settings_but_keeps_styles_and_page_setup(
     assert MECH_TOOLS <= disabled
     assert ARCH_TOOLS <= disabled
     assert PLANT_TOOLS <= disabled
+    assert GEAR_TOOLS <= disabled and GDT_TOOLS <= disabled, "v1.7: gears and GD&T left core"
+    assert "drawing_finalize" not in disabled, "every discipline ends with the validator"
     assert not (SHEET_TOOLS & disabled)
     assert not (UNDERSTAND_TOOLS & disabled), "the readers of SECTION 26 are core"
     assert not (STYLE_TOOLS & disabled), "styles are core drafting essentials"
@@ -306,14 +329,14 @@ async def test_lean_carries_the_five_settings_essentials_and_nothing_from_the_se
     assert server.LEAN_TOOL_NAMES & UNDERSTAND_TOOLS == LEAN_UNDERSTAND_ESSENTIALS
     assert not (PLANT_TOOLS & server.LEAN_TOOL_NAMES)
     assert not (SETTINGS_TOOLS & server.LEAN_TOOL_NAMES)
-    assert len(server.LEAN_TOOL_NAMES) == 65
+    assert len(server.LEAN_TOOL_NAMES) == 66, "65 + tool_help (v1.7)"
     monkeypatch.setattr(config.settings, "tool_packs", "core")
     info = await server._apply_tool_profile("lean")
     disabled = set(info["disabled_tools"])
     assert not (LEAN_SETTINGS_ESSENTIALS & disabled)
     assert not ({"sheet_frame", "titleblock_apply"} & disabled), "sheet tools are core"
     assert "drawing_understand" not in disabled, "the one-call report is core"
-    assert info["enabled_count"] == 65 - 10, (
+    assert info["enabled_count"] == 66 - 10, (
         "lean minus the three pid, three mech and four arch tools"
     )
 

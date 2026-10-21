@@ -666,3 +666,49 @@ async def test_search_mode_does_not_shrink_what_the_server_reports_about_itself(
     server._apply_discovery_mode("search")
     assert await server._registered_tool_count() > 100
     assert len(await server._tool_groups()) > 5
+
+
+# ── Russian queries (v1.7) ──────────────────────────────────────────────────
+#
+# v1.6 carried Russian and Turkish synonyms that could never match: both the
+# stock BM25 tokenizer and the phrase matcher split on [a-z0-9], so a Cyrillic
+# phrase became an empty word list. These pin the fix and the vocabulary.
+
+RUSSIAN_TOP_HIT = [
+    ("нарисуй отрезок", "entity_create_line"),
+    ("поставь размерную цепочку", "dimension_auto"),
+    ("создай размерный стиль", "dimstyle_create"),
+    ("добавь выноску с полкой", "leader_create_mleader"),
+    ("заштриховать контур", "entity_create_hatch"),
+    ("сохранить в pdf", "drawing_export_pdf"),
+    ("сделать скриншот области", "view_screenshot"),
+    ("обрезать линии в углу", "entity_trim"),
+    ("сделай слой текущим", "layer_set_current"),
+    ("измерь площадь контура", "analysis_measure_area"),
+    ("создай новый слой", "layer_create"),
+    ("кабельная ведомость", "cable_takeoff"),
+]
+
+
+@pytest.mark.parametrize(("query", "expected"), RUSSIAN_TOP_HIT)
+async def test_a_russian_request_finds_its_tool_first(transform, catalog, query, expected):
+    assert _names(transform.rank(catalog, query, limit=3).hits)[0] == expected
+
+
+def test_cyrillic_words_fold_to_one_stem_per_noun():
+    from discovery.transform import _fold_word
+
+    assert _fold_word("линия") == _fold_word("линии")
+    assert _fold_word("отметка") == _fold_word("отметку") == _fold_word("отметки")
+    assert _fold_word("выноска") == _fold_word("выноску")
+    assert _fold_word("ёлка") == _fold_word("елка")
+    assert _fold_word("слой") == "сло", "never shorter than three letters"
+    assert _fold_word("Layer".lower()) == "layer", "ASCII passes through unchanged"
+
+
+async def test_an_english_query_ranks_exactly_as_before(transform, catalog):
+    """The Unicode tokenizer changes nothing for ASCII text."""
+    from discovery.transform import _index_text
+
+    assert _index_text("Fillet the corner, R5") == "fillet the corner r5"
+    assert _names(transform.rank(catalog, "fillet the corner", limit=1).hits) == ["entity_fillet"]

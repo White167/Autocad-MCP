@@ -1,0 +1,8 @@
+# Read-only review of a drawing: every tool whose @cad_tool cost is "read",
+# plus drawing_diff (read-only unless markup=True). Nothing here edits geometry.
+description = "Read-only review: every read-cost tool plus drawing_diff."
+base = "full"
+packs = ["all"]
+costs = ["read"]
+include = ["drawing_diff"]
+descriptions = "short"

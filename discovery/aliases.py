@@ -1558,6 +1558,15 @@ TOOL_ALIASES: dict[str, ToolAliases] = {
             "version information",
         ),
     ),
+    "tool_help": ToolAliases(
+        acad=("HELP",),
+        synonyms=(
+            "help on a tool",
+            "full tool description",
+            "parameter schema",
+            "how do i call this tool",
+        ),
+    ),
     "system_capabilities": ToolAliases(
         synonyms=(
             "what is supported",
@@ -2722,6 +2731,96 @@ def _fold_in(records: dict[str, ToolAliases], extra) -> None:
 
 
 _fold_in(TOOL_ALIASES, _TRACK_H_VOCABULARY)
+
+# v1.7: the Russian a drafter actually types (СПДС / ЕСКД vocabulary). Short
+# phrases on purpose: a synonym boosts a tool only when it appears whole in
+# the query, and "нарисуй отрезок от 0,0" contains "отрезок", not a sentence.
+# Matching folds Cyrillic words to their first five letters (see
+# discovery.transform.CYRILLIC_STEM), so one form covers the inflections.
+_RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "drawing_new": ((), ("новый чертеж", "создать чертеж")),
+    "drawing_open": ((), ("открыть чертеж", "открыть файл")),
+    "drawing_save": ((), ("сохранить чертеж", "сохранить")),
+    "drawing_save_as": ((), ("сохранить как",)),
+    "drawing_export_pdf": ((), ("в pdf", "печать в pdf", "экспорт pdf")),
+    "drawing_info": ((), ("сведения о чертеже", "информация о чертеже")),
+    "drawing_undo": ((), ("отменить", "отмена")),
+    "drawing_purge": ((), ("очистить чертеж",)),
+    "entity_create_line": ((), ("отрезок", "линия", "провести линию")),
+    "entity_create_polyline": ((), ("полилиния", "ломаная", "контур")),
+    "entity_create_rectangle": ((), ("прямоугольник",)),
+    "entity_create_circle": ((), ("окружность", "круг")),
+    "entity_create_arc": ((), ("дуга",)),
+    "entity_create_ellipse": ((), ("эллипс",)),
+    "entity_create_spline": ((), ("сплайн",)),
+    "entity_create_point": ((), ("точка",)),
+    "entity_create_text": ((), ("текст", "надпись", "однострочный текст")),
+    "entity_create_mtext": ((), ("многострочный текст", "мтекст")),
+    "entity_create_hatch": ((), ("штриховка", "заштриховать")),
+    "entity_create_table": ((), ("таблица",)),
+    "leader_create_mleader": ((), ("выноска", "мультивыноска", "полка выноски")),
+    "dimension_linear": ((), ("размер", "линейный размер", "проставить размер")),
+    "dimension_aligned": ((), ("параллельный размер", "выровненный размер")),
+    "dimension_radius": ((), ("радиус", "радиальный размер")),
+    "dimension_diameter": ((), ("диаметр",)),
+    "dimension_angular": ((), ("угловой размер", "угол")),
+    "dimension_auto": ((), ("цепочка размеров", "размерная цепочка")),
+    "entity_move": ((), ("переместить", "сдвинуть")),
+    "entity_copy": ((), ("копировать", "скопировать")),
+    "entity_rotate": ((), ("повернуть",)),
+    "entity_scale": ((), ("масштабировать",)),
+    "entity_mirror": ((), ("зеркально", "отразить")),
+    "entity_offset": ((), ("подобие", "смещение контура", "эквидистанта")),
+    "entity_delete": ((), ("удалить объект", "стереть")),
+    "entity_delete_many": ((), ("удалить объекты",)),
+    "entity_trim": ((), ("обрезать", "обрезать линии", "подрезать")),
+    "entity_extend": ((), ("удлинить",)),
+    "entity_fillet": ((), ("сопряжение", "скругление")),
+    "entity_chamfer": ((), ("фаска",)),
+    "entity_array_rectangular": ((), ("прямоугольный массив", "массив")),
+    "entity_array_polar": ((), ("круговой массив", "массив по кругу")),
+    "entity_set_properties": ((), ("свойства объекта", "сменить слой", "цвет объекта")),
+    "entity_edit_text": ((), ("изменить текст", "редактировать текст")),
+    "entity_list": ((), ("список объектов", "объекты на слое")),
+    "entity_get": ((), ("свойства", "параметры объекта")),
+    "layer_create": ((), ("создать слой", "новый слой")),
+    "layer_list": ((), ("список слоев", "слои")),
+    "layer_set_current": ((), ("текущий слой", "сделать слой текущим")),
+    "layer_modify": ((), ("изменить слой", "вес линии слоя")),
+    "layer_freeze": ((), ("заморозить слой",)),
+    "layer_thaw": ((), ("разморозить слой",)),
+    "linetype_load": ((), ("загрузить тип линии", "тип линии")),
+    "block_insert": ((), ("вставить блок",)),
+    "block_define": ((), ("создать блок", "определение блока")),
+    "block_list": ((), ("список блоков", "блоки")),
+    "block_set_attributes": ((), ("атрибуты блока", "заполнить атрибуты")),
+    "layout_create": ((), ("создать лист", "новый лист")),
+    "layout_set_current": ((), ("перейти на лист", "открыть лист")),
+    "layout_list": ((), ("список листов", "листы")),
+    "viewport_create": ((), ("видовой экран",)),
+    "viewport_set_scale": ((), ("масштаб видового экрана",)),
+    "viewport_lock": ((), ("заблокировать видовой экран",)),
+    "dimstyle_create": ((), ("размерный стиль", "стиль размеров", "новый размерный стиль")),
+    "textstyle_create": ((), ("текстовый стиль", "стиль текста")),
+    "view_screenshot": ((), ("скриншот", "снимок экрана", "скрин")),
+    "view_zoom_window": ((), ("показать рамкой", "зумировать", "увеличить область")),
+    "view_zoom_extents": ((), ("показать все", "весь чертеж")),
+    "analysis_measure_distance": ((), ("расстояние", "измерить расстояние")),
+    "analysis_measure_area": ((), ("площадь", "измерить площадь")),
+    "analysis_bounding_box": ((), ("габариты", "габарит чертежа")),
+    "analysis_layer_stats": ((), ("статистика слоев", "объекты по слоям")),
+    "drawing_understand": ((), ("разобрать чертеж", "что на чертеже")),
+    "drawing_diff": ((), ("сравнить чертежи", "сравнить версии")),
+    "drawing_critique": ((), ("проверить чертеж", "проверка оформления")),
+    "cad_batch": ((), ("пакет операций", "пакетно")),
+    "system_run_lisp": ((), ("лисп", "выполнить lisp")),
+    "system_run_command": ((), ("команда autocad", "командная строка")),
+    "transaction_begin": ((), ("начать транзакцию",)),
+    "transaction_rollback": ((), ("откатить", "откат")),
+    "tool_help": ((), ("справка по инструменту", "описание инструмента")),
+}
+
+_fold_in(TOOL_ALIASES, _RUSSIAN_VOCABULARY)
 
 
 def aliases_for(tool_name: str) -> ToolAliases | None:
