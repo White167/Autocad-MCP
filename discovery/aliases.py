@@ -1584,6 +1584,30 @@ TOOL_ALIASES: dict[str, ToolAliases] = {
             "what did my edits do",
         ),
     ),
+    "spds_setup": ToolAliases(
+        synonyms=(
+            "gost setup",
+            "spds setup",
+            "gost layers and styles",
+            "russian construction drawing standard",
+        ),
+    ),
+    "spds_sheet": ToolAliases(
+        synonyms=(
+            "gost title block",
+            "spds frame",
+            "gost frame form 3",
+            "russian title block",
+        ),
+    ),
+    "spds_axis": ToolAliases(synonyms=("grid line with bubble", "column axis mark", "axis bubble")),
+    "spds_axis_grid": ToolAliases(
+        synonyms=("structural grid", "column grid", "grid lines with bubbles", "axis grid")
+    ),
+    "spds_elevation": ToolAliases(
+        synonyms=("level mark", "elevation mark", "level symbol", "height mark")
+    ),
+    "spds_leader": ToolAliases(synonyms=("gost leader", "callout with shelf", "leader note")),
     "tool_help": ToolAliases(
         acad=("HELP",),
         synonyms=(
@@ -2846,6 +2870,12 @@ _RUSSIAN_VOCABULARY: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "tool_help": ((), ("справка по инструменту", "описание инструмента")),
     "drawing_digest": ((), ("сводка по чертежу", "состояние чертежа", "что на чертеже сейчас")),
     "drawing_checkpoint": ((), ("контрольная точка", "запомнить состояние")),
+    "spds_setup": ((), ("настроить спдс", "слои по госту", "стили по госту", "оформление по госту")),
+    "spds_sheet": ((), ("рамка", "штамп", "основная надпись", "форма 3", "рамка со штампом")),
+    "spds_axis": ((), ("ось", "координационная ось", "марка оси")),
+    "spds_axis_grid": ((), ("сетка осей", "координационные оси", "оси здания")),
+    "spds_elevation": ((), ("отметка", "высотная отметка", "отметка уровня")),
+    "spds_leader": ((), ("выноска по госту", "полка", "выноска с полкой")),
     "drawing_diff_since": ((), ("что изменилось", "изменения с контрольной точки")),
 }
 

@@ -6604,6 +6604,26 @@ class EzdxfBackend(AutoCADBackend):
 
         return await self._async(_sync)
 
+    async def linetype_define(self, name, pattern, description="") -> dict:
+        from security import sanitize_symbol_name
+
+        from .contracts.linetypes import validate_linetype_pattern
+
+        clean = sanitize_symbol_name(name, kind="linetype")
+        elements = validate_linetype_pattern(pattern)
+
+        def _sync():
+            doc = self._require_doc()
+            existing = {lt.dxf.name.lower() for lt in doc.linetypes}
+            if clean.lower() in existing:
+                return {"ok": True, "name": clean, "already_loaded": True}
+            total = sum(abs(v) for v in elements)
+            doc.linetypes.add(clean, pattern=[total, *elements], description=str(description))
+            self._mark_dirty()
+            return {"ok": True, "name": clean, "pattern": elements, "created": True}
+
+        return await self._async(_sync)
+
     async def linetype_load(self, name, file=None) -> dict:
         # Loads a single linetype. Lookup order:
         # 1. ezdxf.tools.standards (ISO: CENTER, DASHED, DASHDOT, PHANTOM, ...)

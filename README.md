@@ -19,13 +19,13 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 
 </div>
 
-> **v1.6 release snapshot:** 251 tools · 8 resources · 5 prompt templates · 5076 collected tests.
-> 251 is the **registered** count; a default install advertises 246 over `tools/list`,
+> **v1.6 release snapshot:** 257 tools · 8 resources · 5 prompt templates · 5100 collected tests.
+> 257 is the **registered** count; a default install advertises 252 over `tools/list`,
 > because `ENABLE_3D` is unset. `system_about` is the runtime authority.
 
 ## What's new in 1.7 (unreleased)
 
-**Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 7k tokens of tool listing instead of 59k, and still reaches all 170 tools it enables.
+**Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 8.6k tokens of tool listing instead of 62k, and still reaches all 176 tools it enables (the СПДС pack included).
 
 - `TOOL_CONFIG` takes a `.toml` file or a bundled preset (`spds`, `drafting`, `review`). The file can pick packs, drop tools by tag or name, keep only some `@cad_tool` costs, and pin tools ([`discovery/profiles.py`](discovery/profiles.py)).
 - `TOOL_DESCRIPTIONS=short` lists each tool by its summary line, with first-sentence parameter notes, and drops schema boilerplate. No type, enum, bound, default or `required` entry changes, and every call is still validated against the full schema. `tool_help(name)` returns the full text.
@@ -33,6 +33,7 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 - `drawing_digest` describes the drawing's state (counts, extents, open contours, objects outside the frame, duplicates) in a few hundred characters, in place of a screenshot. `drawing_checkpoint` + `drawing_diff_since` return only what changed, one line per entity.
 - `TOOL_RESPONSES=compact` makes a write tool answer `{handle, type}` instead of the full entity record.
 - Screenshots default to 800 px and take a window in drawing units, `mono`, `jpeg` and a layer filter. On a live seat a framed screenshot is rendered from a snapshot, so the AutoCAD view never moves.
+- The `spds` pack provides construction drawings to ГОСТ Р 21.101-2020, one call each: `spds_setup` (linetypes, layers, GOST text style, `СПДС_1-M` dimension styles), `spds_sheet` (A4/A3 frame with основная надпись форма 3), `spds_axis` / `spds_axis_grid`, `spds_elevation` (`±0,000`), `spds_leader`.
 - Gears and keyways moved out of `core` into the `gear` pack, and GD&T into the `gdt` pack.
 - Russian search terms now work. The v1.6 Russian and Turkish synonyms never matched, because the tokenizer split on `[a-z0-9]`. Common drafting requests in Russian now resolve, using a crude Cyrillic stem.
 
@@ -92,12 +93,12 @@ From 1.7, what the *model* reads matters more than the wire payload: a client fo
 
 | Surface (1.7) | Tools listed | Model-visible listing |
 |---|---:|---:|
-| `TOOL_PROFILE=full` (default) | 246 | ≈ 59,000 tokens |
-| `TOOL_DESCRIPTIONS=short` | 246 | ≈ 29,400 tokens |
-| `TOOL_PROFILE=lean`, `TOOL_DESCRIPTIONS=short` | 69 | ≈ 8,800 tokens |
-| `TOOL_CONFIG=drafting` | 180 | ≈ 19,700 tokens |
+| `TOOL_PROFILE=full` (default) | 252 | ≈ 61,900 tokens |
+| `TOOL_DESCRIPTIONS=short` | 252 | ≈ 30,900 tokens |
+| `TOOL_PROFILE=lean`, `TOOL_DESCRIPTIONS=short` | 69 | ≈ 9,000 tokens |
+| `TOOL_CONFIG=drafting` | 180 | ≈ 20,000 tokens |
 | `TOOL_CONFIG=review` | 73 | ≈ 7,000 tokens |
-| `TOOL_CONFIG=spds` (hybrid: 64 pinned, 106 more by search) | 66 | ≈ 7,100 tokens |
+| `TOOL_CONFIG=spds` (hybrid: 70 pinned, 106 more by search) | 72 | ≈ 8,600 tokens |
 
 > [!NOTE]
 > These are offline ratio estimates, not tokenizer counts, and they are the *uncached* cost: prompt caching amortises the idle term. `benchmarks/token_suite.py --tokenizer anthropic` counts for real.
@@ -395,7 +396,7 @@ Nothing loads a `.env` file — export these, or set them in your MCP client's `
 | `AUTOCAD_MCP_BACKEND` | `auto` | `auto`, `com`, or `ezdxf` |
 | `CAD_PROGID` | `AutoCAD.Application` | COM ProgID the live backend attaches to |
 | `TOOL_PROFILE` | `full` | `lean` (69 curated tools, 59 with `TOOL_PACKS=core`) or `full` |
-| `TOOL_PACKS` | `all` | Vertical packs to advertise: `core,pid,settings,mech,arch,plant,gear,gdt` (`core` always on) |
+| `TOOL_PACKS` | `all` | Vertical packs to advertise: `core,pid,settings,mech,arch,plant,gear,gdt,spds` (`core` always on) |
 | `TOOL_CONFIG` | *(empty)* | A `.toml` tool config or a preset (`spds`, `drafting`, `review`). Its keys win over the three variables around it |
 | `TOOL_DESCRIPTIONS` | `full` | `short` lists each tool by its summary line with a compacted schema; `tool_help(name)` gives the full text |
 | `TOOL_RESPONSES` | `full` | `compact`: a write tool answers `{handle, type}`, floats rounded to 4 decimals |

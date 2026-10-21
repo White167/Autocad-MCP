@@ -299,6 +299,27 @@ _ENTRIES: tuple[SysVar, ...] = (
         "centre mark size for radial dimensions; 0 none, negative draws centre lines",
         default=2.5,
     ),
+    # v1.7, for the СПДС dimension styles (ГОСТ 2.307 ticks): the dimension line
+    # runs past the extension lines, the text sits centred above it.
+    _v(
+        "DIMDLE",
+        "float",
+        "dimension line extension beyond the extension lines (ticks only)",
+        default=0.0,
+    ),
+    _v(
+        "DIMJUST",
+        "int",
+        "horizontal text position: 0 centred, 1-2 next to an extension line, 3-4 over one",
+        range_=(0, 4),
+        default=0,
+    ),
+    _v(
+        "DIMTOFL",
+        "bool",
+        "draw the dimension line between the extension lines even with the text outside",
+        default=0,
+    ),
     # ── scales, units, precision ─────────────────────────────────────────────
     _v(
         "LTSCALE",

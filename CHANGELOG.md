@@ -11,8 +11,8 @@ The first stage of the token-economy roadmap
 (`docs/plans/token-economy-roadmap.md`): a client pays for the tools it uses,
 and for less text per tool. Measured with `benchmarks/token_suite.py` on the
 model-visible listing (name + description + input schema, `prompt_chars`):
-the default surface is ≈ 59,000 tokens, the bundled `spds` profile is
-≈ 7,100.
+the default surface is ≈ 61,900 tokens, the bundled `spds` profile is
+≈ 8,600 (with the СПДС pack).
 
 ### Added
 
@@ -34,7 +34,32 @@ the default surface is ≈ 59,000 tokens, the bundled `spds` profile is
   `required` are untouched; the transform rewrites only the listing, so every
   call is still validated by the registered schema. The server instructions
   switch to a short, discipline-neutral text. This mode halves the
-  model-visible listing: 59.0k → 29.4k tokens on the default surface.
+  model-visible listing: 61.9k → 30.9k tokens on the default surface.
+- **The `spds` pack** (stage 4, SECTION 28, `engineering/spds/`). It covers
+  construction drawings to ГОСТ Р 21.101-2020, one call per element, with no
+  AutoLISP library to load:
+  - `spds_setup`: ГОСТ linetypes, the layer set, the GOST text style on
+    isocpeur.ttf, `СПДС_1-M` dimension styles with 45° ticks, and the units.
+    Idempotent.
+  - `spds_sheet`: an A4 or A3 frame 20/5/5/5 with the основная надпись форма 3
+    filled in, signatures, "Формат А3", and optionally the margin graphs. Long
+    names are compressed to a width factor of 0.8 and then wrapped.
+  - `spds_axis` / `spds_axis_grid`: coordinate axes with marks in circles.
+    Digits go on the side with more axes; forbidden letters are skipped.
+  - `spds_elevation`: levels formatted `±0,000`, a section arrow with a shelf,
+    or a box on a plan.
+  - `spds_leader`: a leader with a shelf and a dot, arrow or no end.
+
+  Every value is transcribed from the owner's verified `autocad-spds` library
+  (`engineering/spds/standards.py` names the standard per block); a format or
+  size outside it is refused by name. The `spds` preset lists the pack. The
+  COM paths go through the same backend contract as every other tool and have
+  not yet been run live.
+- **`linetype_define(name, pattern, description)`**: a new contract on both
+  engines for a linetype built from a dash pattern (ezdxf adds it directly; COM
+  loads a temporary `.lin`). It is idempotent.
+- `DIM_VARIABLE_WHITELIST` gains `DIMDLE`, `DIMJUST` and `DIMTOFL` (36), with
+  `SYSVAR_CATALOG` entries, for the ГОСТ 2.307 tick styles.
 - **`drawing_digest`** (stage 2, `engineering/digest.py`) replaces a
   screenshot after a series of edits. It reports, in a few hundred
   characters, the entities per layer and type, the robust extents and their

@@ -64,6 +64,9 @@ DIM_WHITELIST = (
     "DIMBLK1",
     "DIMBLK2",
     "DIMCEN",
+    "DIMDLE",
+    "DIMJUST",
+    "DIMTOFL",
 )
 
 SPEC_NAMES = (

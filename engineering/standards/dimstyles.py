@@ -204,6 +204,12 @@ DIM_VARIABLE_RANGES: dict[str, tuple | set] = {
     "DIMBLK1": ("arrow",),
     "DIMBLK2": ("arrow",),
     "DIMCEN": ("float", -1e6, 1e6),  # negative draws centre lines, 0 none
+    # v1.7 - what a ГОСТ 2.307 tick style needs beyond the arrowhead: the
+    # dimension line past the extension lines (DIMDLE), centred text (DIMJUST)
+    # and the line drawn between the extension lines when text sits outside.
+    "DIMDLE": ("float", 0.0, 1e6),
+    "DIMJUST": ("int", 0, 4),
+    "DIMTOFL": {0, 1},
 }
 
 DIM_VARIABLE_WHITELIST: frozenset[str] = frozenset(DIM_VARIABLE_RANGES)

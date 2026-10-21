@@ -3,10 +3,10 @@
   "schema_version": 1,
   "package_version": "1.6.0",
   "totals": {
-    "tools": 251,
+    "tools": 257,
     "resources": 8,
     "prompts": 5,
-    "groups": 28
+    "groups": 29
   },
   "groups": {
     "analysis": 12,
@@ -30,6 +30,7 @@
     "premium": 12,
     "sheet": 11,
     "solids": 5,
+    "spds": 6,
     "styles": 10,
     "system": 8,
     "templates": 2,
@@ -2880,6 +2881,96 @@
       "annotations": {
         "title": "Solid: Revolve",
         "destructiveHint": false
+      }
+    },
+    {
+      "name": "spds_axis",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС coordinate axis: dash-dot line with its mark in a circle.",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Axis",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_axis_grid",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС axis grid: every axis and mark of a plan, digits and letters by the rule.",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Axis Grid",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_elevation",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС level mark: ±0,000 in metres, arrow and shelf (section) or boxed (plan).",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Level Mark",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_leader",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС leader: target dot or arrow, shelf, note above and below it.",
+      "tags": [
+        "annotation",
+        "create",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Leader",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_setup",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "Prepare an СПДС drawing: ГОСТ linetypes, layers, GOST text style, СПДС_1-M dimstyles.",
+      "tags": [
+        "create",
+        "spds",
+        "style"
+      ],
+      "annotations": {
+        "title": "СПДС: Setup",
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spds_sheet",
+      "group": "spds",
+      "cost": "mutate",
+      "summary": "СПДС sheet: frame 20/5/5/5 and основная надпись form 3 (A4, A3), filled in.",
+      "tags": [
+        "create",
+        "sheet",
+        "spds"
+      ],
+      "annotations": {
+        "title": "СПДС: Sheet with Title Block",
+        "readOnlyHint": false
       }
     },
     {

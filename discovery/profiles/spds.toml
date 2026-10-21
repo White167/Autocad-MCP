@@ -6,7 +6,7 @@
 # balloons) - an СПДС sheet has its own frame and основная надпись.
 description = "СПДС construction drafting: 2D core, layouts, styles, readers; no ISO sheet, no verticals."
 base = "full"
-packs = ["core"]
+packs = ["core", "spds"]
 exclude_groups = ["gear", "gdt"]
 exclude = [
     "sheet_frame",
@@ -32,6 +32,8 @@ responses = "compact"
 # filters above leave enabled is one search_tools call away (call_tool runs it).
 discovery = "hybrid"
 pinned = [
+    # the СПДС pack (SECTION 28)
+    "spds_setup", "spds_sheet", "spds_axis", "spds_axis_grid", "spds_elevation", "spds_leader",
     # drawing
     "drawing_new", "drawing_open", "drawing_save", "drawing_save_as", "drawing_info",
     "drawing_export_pdf", "drawing_undo", "document_list", "document_activate",

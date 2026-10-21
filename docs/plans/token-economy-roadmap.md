@@ -32,7 +32,8 @@
 | 3. Дешёвые скриншоты | ✅ сделано на ezdxf; COM-путь (`view_render` из снимка `Document.Export`) ждёт прогона `scripts/smoke_screenshot_com.py` на AutoCAD 2026 |
 | 2. digest, checkpoint/diff, компактные ответы | ✅ сделано: `drawing_digest`, `drawing_checkpoint`, `drawing_diff_since`, `TOOL_RESPONSES=compact` (в `spds` включён). Столбцовый формат `entity_list` не делал: у него уже есть `fields` и `compact` |
 | 5. Баги COM из скилла | ✅ в коде: 5.1 (`run_lisp` возвращает значение), 5.3–5.7, 5.9, 5.10. 5.2 (`GetVariable`) уже был исправлен в 1.6.0. 5.8 (автоповтор) частично: повтор отклонённого вызова уже есть. Живой прогон на AutoCAD 2026 — вместе с общей проверкой |
-| 4, 6 | впереди (следующий — 4: пак СПДС) |
+| 4. Пак `spds` | ✅ сделано: `spds_setup`, `spds_sheet` (форма 3, А4/А3), `spds_axis`, `spds_axis_grid`, `spds_elevation`, `spds_leader` + контракт `linetype_define`. Ещё не сделано из плана: `spds_section_mark`, `spds_slope`, `spds_soil_hatch`, форма 2а, фокусы критики `spds_*`, `spds_sheet_update` |
+| 6. Скилл и инструкции | впереди |
 
 Цикл «действие → проверка» после этапа 2 (ezdxf, лист А3 с десятком объектов):
 `drawing_diff_since` ≈ 40–80 токенов, `drawing_digest` ≈ 100 токенов, ответ на создание
@@ -47,12 +48,12 @@
 
 | Поверхность | Инструментов в списке | ≈ токенов |
 |---|---:|---:|
-| `full` (по умолчанию) | 246 | 59 000 |
-| `TOOL_DESCRIPTIONS=short` | 246 | 29 400 |
-| `lean` + `short` | 69 | 8 800 |
-| `TOOL_CONFIG=drafting` | 180 | 19 700 |
+| `full` (по умолчанию) | 252 | 61 900 |
+| `TOOL_DESCRIPTIONS=short` | 252 | 30 900 |
+| `lean` + `short` | 69 | 9 000 |
+| `TOOL_CONFIG=drafting` | 180 | 20 000 |
 | `TOOL_CONFIG=review` | 73 | 7 000 |
-| `TOOL_CONFIG=spds` (hybrid: 64 закреплено, ещё 106 через поиск) | 66 | **7 100** |
+| `TOOL_CONFIG=spds` (hybrid: 70 закреплено вместе с пакетом СПДС, ещё 106 через поиск) | 72 | **8 600** |
 
 ---
 

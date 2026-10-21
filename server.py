@@ -742,6 +742,7 @@ async def _registered_tool_count() -> int | None:
 # specific tags (engineering/premium/corner) take precedence over the broad
 # entity/drawing tags. Tools whose tags match none fall into "other".
 _GROUP_TAG_PRIORITY = (
+    "spds",
     "pid",
     "mech",
     "arch",
@@ -775,6 +776,7 @@ _GROUP_TAG_PRIORITY = (
 
 # Map the winning tag to a human-readable group label for the breakdown.
 _GROUP_TAG_LABELS = {
+    "spds": "spds",
     "pid": "pid",
     "mech": "mechanical",
     "arch": "architecture",
@@ -1058,7 +1060,7 @@ SOLID_TOOL_NAMES = frozenset(
 # mechanically should not pay for the P&ID surface, and a client that never
 # talks to a live seat should not pay for the environment surface. Styles and
 # page setup (SECTION 18/19) are drafting essentials and stay in core.
-TOOL_PACK_NAMES = ("core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt")
+TOOL_PACK_NAMES = ("core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt", "spds")
 PACK_TOOL_NAMES: dict[str, frozenset[str]] = {
     # SECTION 12's parametric gear and keyway views (v1.7). Mechanical-only
     # primitives that a construction or general drafting client never calls;
@@ -1075,6 +1077,18 @@ PACK_TOOL_NAMES: dict[str, frozenset[str]] = {
     # SECTION 14's ISO 1101 / ASME Y14.5 symbols (v1.7): feature control frames
     # and datum features, mechanical tolerancing only.
     "gdt": frozenset({"gd_frame", "datum_feature"}),
+    # SECTION 28 (v1.7): ГОСТ Р 21.101-2020 sheets and marks for construction
+    # drawings.
+    "spds": frozenset(
+        {
+            "spds_setup",
+            "spds_sheet",
+            "spds_axis",
+            "spds_axis_grid",
+            "spds_elevation",
+            "spds_leader",
+        }
+    ),
     "pid": frozenset(
         {
             "pid_symbol_list",
@@ -12105,6 +12119,375 @@ async def cable_takeoff(
         )
     except (ValueError, OSError) as exc:
         raise ToolError(str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# ── SECTION 28: СПДС sheets and marks (6 tools) ─────────────────────────────
+# ---------------------------------------------------------------------------
+#
+# engineering/spds/: ГОСТ Р 21.101-2020 sheets and marks for construction
+# drawings, each one call instead of a loaded AutoLISP library. Pack `spds`.
+# The values are transcribed (engineering/spds/standards.py says from where);
+# a format or size outside them is refused by name.
+
+
+async def _spds_draw(ctx: Context, prims, *, scale: float, origin=(0.0, 0.0)) -> list[str]:
+    from engineering.spds.draw import draw_prims
+
+    return await draw_prims(_backend(ctx), prims, origin=tuple(origin), scale=float(scale))
+
+
+_SPDS_SCALE_DOC = (
+    "Drawing scale denominator (100 = 1:100): marks are drawn at their paper size x scale, "
+    "for a model drawn 1:1 and plotted at 1:scale. 1 on a sheet layout."
+)
+
+
+@cad_tool(
+    summary="Prepare an СПДС drawing: ГОСТ linetypes, layers, GOST text style, СПДС_1-M dimstyles.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Setup", "readOnlyHint": False},
+    tags={"spds", "style", "create"},
+)
+async def spds_setup(
+    scales: Annotated[
+        list[int],
+        Field(
+            default=[100],
+            min_length=1,
+            description="Drawing scales to make dimension styles for, e.g. [100, 50].",
+        ),
+    ] = [100],  # noqa: B006 - pydantic copies the default
+    current_scale: Annotated[
+        int | None,
+        Field(default=None, description="Make СПДС_1-<this> the current dimension style."),
+    ] = None,
+    current_layer: Annotated[
+        str | None, Field(default="Контур", description="Layer to make current afterwards.")
+    ] = "Контур",
+    ctx: Context = None,
+) -> dict:
+    """Everything an СПДС drawing needs before its first entity, in one call.
+
+    Linetypes GOST_DASH (4/1.5), GOST_AXIS (15/2 dot 2), GOST_2DOT (ГОСТ 2.303);
+    layers Контур 0.5, Тонкие 0.18, Невидимые (dashed), Оси (dash-dot), Оси_марки,
+    Размеры, Отметки, Выноски, Текст, Штриховка, СПДС_Рамка / СПДС_Рамка_тонкие;
+    text style GOST on isocpeur.ttf; one dimension style СПДС_1-M per scale
+    (45° ticks 2 mm, the line 2 mm past the extension lines, text 2.5 mm
+    centred above, whole mm, decimal comma, DIMSCALE = M); INSUNITS mm,
+    LWDISPLAY on, LTSCALE / PSLTSCALE / MSLTSCALE 1. Idempotent: what exists
+    stays as it is and is reported present. Dimension with
+    `dimension_*(dimstyle="СПДС_1-100")`.
+    """
+    from engineering.spds.setup import spds_setup as _setup
+
+    try:
+        return await _setup(
+            _backend(ctx), scales, current_scale=current_scale, current_layer=current_layer
+        )
+    except ValueError as exc:
+        raise ToolError(f"spds_setup: {exc}") from exc
+
+
+@cad_tool(
+    summary="СПДС sheet: frame 20/5/5/5 and основная надпись form 3 (A4, A3), filled in.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Sheet with Title Block", "readOnlyHint": False},
+    tags={"spds", "sheet", "create"},
+)
+async def spds_sheet(
+    format: Annotated[
+        str, Field(default="A3", description="A4 (portrait) or A3 (landscape or portrait).")
+    ] = "A3",
+    orientation: Annotated[
+        str | None,
+        Field(default=None, description="landscape / portrait; default A3 landscape, A4 portrait."),
+    ] = None,
+    stamp: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            description="Graphs by number or name: code (1), project (2), building (3), "
+            "sheet_title (4), stage (6), sheet (7), sheets (8), organisation (9).",
+        ),
+    ] = None,
+    signatures: Annotated[
+        list[list[str]] | None,
+        Field(
+            default=None,
+            description="Up to 5 rows [role, surname, date], top first, e.g. "
+            '[["Разраб.", "Иванов", "10.26"], ["Пров.", "Петров", ""]].',
+        ),
+    ] = None,
+    extra_columns: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="The margin graphs Инв. № подл. / Подп. и дата / Взам. инв. №.",
+        ),
+    ] = False,
+    layout: Annotated[
+        str | None,
+        Field(default=None, description="Paper layout to draw on (1:1); default: model space."),
+    ] = None,
+    origin: Annotated[
+        list[float] | None,
+        Field(default=None, min_length=2, max_length=2, description="Sheet lower-left corner."),
+    ] = None,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """The outer sheet line, the frame (20 mm filing margin, 5 mm elsewhere) and
+    the основная надпись форма 3 (ГОСТ Р 21.101-2020 прил. Ж, 185 x 55 mm; its graphs
+    in `stamp`) in the
+    lower right corner, with "Формат А3" under it and, optionally, the margin
+    graphs. Texts use the GOST style; a text wider than its cell is compressed
+    to a width factor of 0.8, then (graphs 2, 3, 4, 9) split onto two lines;
+    `fitted` lists every factor below 1 (the widths are an ISO 3098 estimate:
+    a live seat prints the same or narrower). Graph 8 belongs on the first
+    sheet only - leave it out on the others. Returns the frame box (for
+    `drawing_digest(frame=...)`) and the stamp origin; the handles only as a
+    count. A4 is portrait only; other formats are refused with the list.
+    """
+    from engineering.sheet.frames import enter_layout
+    from engineering.spds.sheet import sheet_prims
+
+    try:
+        sheet = sheet_prims(
+            format,
+            orientation,
+            fields=stamp,
+            signatures=[list(r) for r in (signatures or [])],
+            extra_columns=extra_columns,
+        )
+    except ValueError as exc:
+        raise ToolError(f"spds_sheet: {exc}") from exc
+    backend = _backend(ctx)
+    try:
+        previous = await enter_layout(backend, layout, caller="spds_sheet")
+    except RuntimeError as exc:
+        raise ToolError(str(exc)) from exc
+    o = tuple(origin) if origin else (0.0, 0.0)
+    try:
+        handles = await _spds_draw(ctx, sheet["prims"], scale=scale, origin=o)
+    finally:
+        if layout is not None:
+            await backend.layout_set_current(previous)
+    fl, fb, fr, ft = sheet["frame"]
+    k = float(scale)
+    return {
+        "ok": True,
+        "format": sheet["format"],
+        "orientation": sheet["orientation"],
+        "layout": layout or "Model",
+        "entities": len(handles),
+        "sheet_box": [o[0], o[1], o[0] + sheet["size"][0] * k, o[1] + sheet["size"][1] * k],
+        "frame": [o[0] + fl * k, o[1] + fb * k, o[0] + fr * k, o[1] + ft * k],
+        "stamp_origin": [
+            o[0] + sheet["stamp_origin"][0] * k,
+            o[1] + sheet["stamp_origin"][1] * k,
+        ],
+        "fitted": [f for f in sheet["fitted"] if f["width_factor"] < 1.0],
+    }
+
+
+@cad_tool(
+    summary="СПДС coordinate axis: dash-dot line with its mark in a circle.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Axis", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_axis(
+    x1: Annotated[float, "Axis start X"],
+    y1: Annotated[float, "Axis start Y"],
+    x2: Annotated[float, "Axis end X"],
+    y2: Annotated[float, "Axis end Y"],
+    mark: Annotated[str, Field(min_length=1, max_length=4, description="The mark: 1, А, 2/1 ...")],
+    ends: Annotated[
+        str, Field(default="start", description="Where the mark goes: start, end, both, none.")
+    ] = "start",
+    diameter: Annotated[
+        float, Field(default=8.0, description="Mark circle, 6-12 mm of paper.")
+    ] = 8.0,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """One coordinate axis (layer Оси, GOST_AXIS) with its mark in a circle of
+    6-12 mm (layer Оси_марки), text 5 mm. A mark with a forbidden letter
+    (Ё З Й О Х Ц Ч Щ Ъ Ы Ь) is refused. For a whole grid use `spds_axis_grid`.
+    """
+    from engineering.spds.marks import axis_prims
+    from engineering.spds.standards import FORBIDDEN_AXIS_LETTERS
+
+    bad = sorted(set(mark.upper()) & FORBIDDEN_AXIS_LETTERS)
+    if bad:
+        raise ToolError(f"spds_axis: the letters {', '.join(bad)} are not used for axis marks")
+    try:
+        prims = axis_prims((x1, y1), (x2, y2), mark, ends=ends, diameter=diameter, scale=scale)
+    except ValueError as exc:
+        raise ToolError(f"spds_axis: {exc}") from exc
+    handles = await _spds_draw(ctx, prims, scale=scale)
+    return {"ok": True, "mark": mark, "axis": handles[0], "entities": len(handles)}
+
+
+@cad_tool(
+    summary="СПДС axis grid: every axis and mark of a plan, digits and letters by the rule.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Axis Grid", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_axis_grid(
+    xs: Annotated[list[float], Field(min_length=1, description="X of each vertical axis.")],
+    ys: Annotated[list[float], Field(min_length=1, description="Y of each horizontal axis.")],
+    overhang: Annotated[
+        float,
+        Field(default=10.0, ge=0, description="Paper mm an axis runs past the outer ones."),
+    ] = 10.0,
+    marks: Annotated[
+        str, Field(default="bottom_left", description="bottom_left (a plan) or all (both ends).")
+    ] = "bottom_left",
+    diameter: Annotated[float, Field(default=8.0, description="Mark circle, 6-12 mm.")] = 8.0,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """A plan's coordinate axes in one call. Digits 1, 2, 3 ... mark the side
+    with more axes (a tie: the vertical axes), Russian capitals the other,
+    skipping Ё З Й О Х Ц Ч Щ Ъ Ы Ь (then АА, ББ ...); left to right and bottom
+    to top; marks at the bottom and left ends unless `marks="all"`. Returns
+    which mark went where, so dimensions and later edits can name an axis.
+    """
+    from engineering.spds.marks import axis_grid_prims
+
+    try:
+        grid = axis_grid_prims(
+            xs, ys, overhang=overhang, marks=marks, diameter=diameter, scale=scale
+        )
+    except ValueError as exc:
+        raise ToolError(f"spds_axis_grid: {exc}") from exc
+    handles = await _spds_draw(ctx, grid["prims"], scale=scale)
+    return {
+        "ok": True,
+        "vertical": grid["vertical"],
+        "horizontal": grid["horizontal"],
+        "digits_on": grid["digits_on"],
+        "entities": len(handles),
+    }
+
+
+@cad_tool(
+    summary="СПДС level mark: ±0,000 in metres, arrow and shelf (section) or boxed (plan).",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Level Mark", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_elevation(
+    x: Annotated[float, "Level point X (section) or label centre (plan)"],
+    y: Annotated[float, "Level point Y"],
+    value: Annotated[
+        float | None, Field(default=None, description="Level in metres; formatted for you.")
+    ] = None,
+    text: Annotated[
+        str | None, Field(default=None, description="Ready text instead of value.")
+    ] = None,
+    kind: Annotated[
+        str, Field(default="section", description="section (arrow, shelf) or plan (in a box).")
+    ] = "section",
+    direction: Annotated[
+        int, Field(default=1, description="Shelf to the right (1) or left (-1).")
+    ] = 1,
+    decimals: Annotated[int, Field(default=3, ge=0, le=4)] = 3,
+    signed: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="+ above zero (relative levels); False for absolute ones (160,65).",
+        ),
+    ] = True,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """A level mark (ГОСТ Р 21.101-2020 п. 5.4.3). `value` is formatted in metres
+    with `decimals` places and a decimal comma: zero unsigned (`0,000`), `+`
+    above, `-` below. `section`: two thin 45° strokes from the level point, a
+    stem, the shelf and the text above it (layer Отметки). `plan`: the text in a
+    rectangle centred on (x, y).
+    """
+    from engineering.spds.marks import elevation_prims, format_elevation
+
+    if (value is None) == (text is None):
+        raise ToolError("spds_elevation: give value (metres) or text, exactly one")
+    try:
+        label = text if text is not None else format_elevation(value, decimals, signed)
+        prims = elevation_prims((x, y), label, kind=kind, direction=direction, scale=scale)
+    except ValueError as exc:
+        raise ToolError(f"spds_elevation: {exc}") from exc
+    handles = await _spds_draw(ctx, prims, scale=scale)
+    return {"ok": True, "text": label, "entities": len(handles), "handles": handles}
+
+
+@cad_tool(
+    summary="СПДС leader: target dot or arrow, shelf, note above and below it.",
+    cost="mutate",
+)
+@mcp.tool(
+    annotations={"title": "СПДС: Leader", "readOnlyHint": False},
+    tags={"spds", "annotation", "create"},
+)
+async def spds_leader(
+    points: Annotated[
+        list[list[float]],
+        Field(
+            min_length=2,
+            description="[[x, y], ...]: the target first, the shelf start last.",
+        ),
+    ],
+    text: Annotated[str, Field(min_length=1, description="Text above the shelf.")],
+    text_below: Annotated[
+        str | None, Field(default=None, description="Text under the shelf.")
+    ] = None,
+    end: Annotated[
+        str,
+        Field(
+            default="dot",
+            description="dot (ends inside a contour), arrow (on a contour line) or none.",
+        ),
+    ] = "dot",
+    height: Annotated[
+        float, Field(default=2.5, gt=0, description="Text height, mm of paper.")
+    ] = 2.5,
+    scale: Annotated[float, Field(default=1.0, gt=0, description=_SPDS_SCALE_DOC)] = 1.0,
+    ctx: Context = None,
+) -> dict:
+    """A leader note: thin leader line from the target to the shelf, the shelf
+    away from the leader as long as the text, the note above it and an optional
+    second line under it (layers Выноски / Текст). The target ends in a filled
+    dot (inside a contour), an arrow (on a contour line) or nothing.
+    """
+    from engineering.spds.marks import leader_prims
+
+    try:
+        prims = leader_prims(
+            [tuple(p[:2]) for p in points],
+            text,
+            text_below=text_below,
+            end=end,
+            height=height,
+            scale=scale,
+        )
+    except ValueError as exc:
+        raise ToolError(f"spds_leader: {exc}") from exc
+    handles = await _spds_draw(ctx, prims, scale=scale)
+    return {"ok": True, "entities": len(handles), "handles": handles}
 
 
 # ---------------------------------------------------------------------------

@@ -5870,6 +5870,46 @@ class ComBackend(AutoCADBackend):
 
         return await self._run(_sync)
 
+    async def linetype_define(self, name, pattern, description="") -> dict:
+        """A .lin definition written to a temporary file, then ``Linetypes.Load``.
+
+        ActiveX has no member that builds a linetype from numbers; ``Load`` from
+        a file is the measured route ``linetype_load`` already uses. The file
+        is ASCII (the description is reduced to ASCII: AutoCAD reads a .lin in
+        the system code page) and is deleted afterwards.
+        """
+        import tempfile
+
+        from .contracts.linetypes import validate_linetype_pattern
+
+        safe_name = sanitize_symbol_name(name, kind="linetype")
+        elements = validate_linetype_pattern(pattern)
+        ascii_description = (
+            str(description).encode("ascii", "replace").decode("ascii").replace(",", ";")
+        ) or safe_name
+        body = ",".join(f"{v:g}" for v in elements)
+
+        def _sync():
+            doc = _acad_doc()
+            existing = {doc.Linetypes.Item(i).Name.lower() for i in range(doc.Linetypes.Count)}
+            if safe_name.lower() in existing:
+                return {"ok": True, "name": safe_name, "already_loaded": True}
+            folder = tempfile.mkdtemp(prefix="acadmcp_lin_")
+            path = os.path.join(folder, "acadmcp.lin")
+            try:
+                with open(path, "w", encoding="ascii", newline="\r\n") as fh:
+                    fh.write(f"*{safe_name},{ascii_description}\nA,{body}\n")
+                _load_linetype(doc, safe_name, path)
+            finally:
+                try:
+                    os.remove(path)
+                    os.rmdir(folder)
+                except OSError:
+                    pass
+            return {"ok": True, "name": safe_name, "pattern": elements, "created": True}
+
+        return await self._run(_sync)
+
     async def linetype_load(self, name, file=None) -> dict:
         # Loads a single linetype from a .lin file. Two things would otherwise
         # bite the user: (1) AutoCAD pops a "Select Linetype File" dialog when

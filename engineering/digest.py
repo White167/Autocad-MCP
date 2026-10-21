@@ -23,7 +23,8 @@ What is reported
                          layer that meets nothing (the ``drawing_topology_check``
                          engine). A contour layer is a layer with a continuous
                          linetype that is not a construction, dimension, text,
-                         hatch or axis layer by name - a centre line has two
+                         hatch, axis, level, leader, mark or frame layer by name
+                         (English or Russian) - a centre line or a leader has
                          free ends by design;
   ``near_miss``          two such ends (or an end and a segment) closer than
                          the topology gap but not joined;
@@ -103,6 +104,13 @@ _NON_CONTOUR_WORDS = (
     "ось",
     "оси",
     "defpoints",
+    "отметк",
+    "level",
+    "вынос",
+    "leader",
+    "марк",
+    "рамк",
+    "frame",
 )
 _CONTINUOUS = ("", "continuous", "bylayer", "byblock")
 _NETWORK_TYPES = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "ARC"})

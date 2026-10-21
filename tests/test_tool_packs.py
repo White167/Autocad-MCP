@@ -199,7 +199,16 @@ GEAR_TOOLS = {
 
 GDT_TOOLS = {"gd_frame", "datum_feature"}
 
-ALL_PACKS = ["core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt"]
+SPDS_TOOLS = {
+    "spds_setup",
+    "spds_sheet",
+    "spds_axis",
+    "spds_axis_grid",
+    "spds_elevation",
+    "spds_leader",
+}
+
+ALL_PACKS = ["core", "pid", "settings", "mech", "arch", "plant", "gear", "gdt", "spds"]
 #: `tool_packs["enabled"]` is sorted, which is no longer the same list.
 ALL_PACKS_ENABLED = sorted(ALL_PACKS)
 
@@ -221,6 +230,7 @@ def test_pack_registry_names_real_tools_and_only_them():
         "plant",
         "gear",
         "gdt",
+        "spds",
     )
     assert server.PACK_TOOL_NAMES["pid"] == frozenset(PID_TOOLS)
     assert server.PACK_TOOL_NAMES["mech"] == frozenset(MECH_TOOLS)
@@ -229,6 +239,7 @@ def test_pack_registry_names_real_tools_and_only_them():
     assert server.PACK_TOOL_NAMES["plant"] == frozenset(PLANT_TOOLS)
     assert server.PACK_TOOL_NAMES["gear"] == frozenset(GEAR_TOOLS)
     assert server.PACK_TOOL_NAMES["gdt"] == frozenset(GDT_TOOLS)
+    assert server.PACK_TOOL_NAMES["spds"] == frozenset(SPDS_TOOLS)
     assert len(SETTINGS_TOOLS) == 22
     assert len(MECH_TOOLS) == 14
     assert len(ARCH_TOOLS) == 12
@@ -265,6 +276,7 @@ async def test_core_only_hides_pid_and_settings_but_keeps_styles_and_page_setup(
     assert ARCH_TOOLS <= disabled
     assert PLANT_TOOLS <= disabled
     assert GEAR_TOOLS <= disabled and GDT_TOOLS <= disabled, "v1.7: gears and GD&T left core"
+    assert SPDS_TOOLS <= disabled, "v1.7: the СПДС pack is opt-in"
     assert "drawing_finalize" not in disabled, "every discipline ends with the validator"
     assert not (SHEET_TOOLS & disabled)
     assert not (UNDERSTAND_TOOLS & disabled), "the readers of SECTION 26 are core"
@@ -362,7 +374,8 @@ async def test_the_three_track_e_sections_file_under_their_own_groups():
     assert set(groups["architecture"]) == ARCH_TOOLS
     assert set(groups["understanding"]) == UNDERSTAND_TOOLS
     assert set(groups["plant"]) == PLANT_TOOLS
-    assert len(groups) == 28
+    assert set(groups["spds"]) == SPDS_TOOLS
+    assert len(groups) == 29
 
 
 async def test_system_about_reports_packs():
