@@ -41,12 +41,12 @@
 
 | Поверхность | Инструментов в списке | ≈ токенов |
 |---|---:|---:|
-| `full` (по умолчанию) | 243 | 57 400 |
-| `TOOL_DESCRIPTIONS=short` | 243 | 28 500 |
-| `lean` + `short` | 66 | 8 100 |
-| `TOOL_CONFIG=drafting` | 177 | 18 800 |
-| `TOOL_CONFIG=review` | 70 | 6 100 |
-| `TOOL_CONFIG=spds` (hybrid: 56 закреплено, ещё 111 через поиск) | 58 | **6 000** |
+| `full` (по умолчанию) | 243 | 58 200 |
+| `TOOL_DESCRIPTIONS=short` | 243 | 28 900 |
+| `lean` + `short` | 66 | 8 400 |
+| `TOOL_CONFIG=drafting` | 177 | 19 200 |
+| `TOOL_CONFIG=review` | 70 | 6 500 |
+| `TOOL_CONFIG=spds` (hybrid: 61 закреплён, ещё 106 через поиск) | 63 | **6 600** |
 
 ---
 

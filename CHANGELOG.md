@@ -11,8 +11,8 @@ The first stage of the token-economy roadmap
 (`docs/plans/token-economy-roadmap.md`): a client pays for the tools it uses,
 and for less text per tool. Measured with `benchmarks/token_suite.py` on the
 model-visible listing (name + description + input schema, `prompt_chars`):
-the default surface is ≈ 57,400 tokens, the bundled `spds` profile is
-≈ 6,000.
+the default surface is ≈ 58,200 tokens, the bundled `spds` profile is
+≈ 6,600.
 
 ### Added
 
@@ -34,7 +34,7 @@ the default surface is ≈ 57,400 tokens, the bundled `spds` profile is
   `required` are untouched; the transform rewrites only the listing, so every
   call is still validated by the registered schema. The server instructions
   switch to a short, discipline-neutral text. This mode halves the
-  model-visible listing: 57.4k → 28.5k tokens on the default surface.
+  model-visible listing: 58.2k → 28.9k tokens on the default surface.
 - **`tool_help(name)`** (SECTION 11, lean): the full docstring and input schema
   behind a short summary. An unknown name answers with the nearest tool names.
 - **`DISCOVERY_MODE=hybrid`** (and `discovery = "hybrid"` in a tool config).

@@ -25,7 +25,7 @@ Live through COM on Windows, or headless through ezdxf anywhere — one typed co
 
 ## What's new in 1.7 (unreleased)
 
-**Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 6k tokens of tool listing instead of 57k, and still reaches all 167 tools it enables.
+**Fewer tokens per session.** A construction client on the bundled `spds` profile sees about 6.6k tokens of tool listing instead of 58k, and still reaches all 167 tools it enables.
 
 - `TOOL_CONFIG` takes a `.toml` file or a bundled preset (`spds`, `drafting`, `review`). The file can pick packs, drop tools by tag or name, keep only some `@cad_tool` costs, and pin tools ([`discovery/profiles.py`](discovery/profiles.py)).
 - `TOOL_DESCRIPTIONS=short` lists each tool by its summary line, with first-sentence parameter notes, and drops schema boilerplate. No type, enum, bound, default or `required` entry changes, and every call is still validated against the full schema. `tool_help(name)` returns the full text.
@@ -89,12 +89,12 @@ From 1.7, what the *model* reads matters more than the wire payload: a client fo
 
 | Surface (1.7) | Tools listed | Model-visible listing |
 |---|---:|---:|
-| `TOOL_PROFILE=full` (default) | 243 | ≈ 57,400 tokens |
-| `TOOL_DESCRIPTIONS=short` | 243 | ≈ 28,500 tokens |
-| `TOOL_PROFILE=lean`, `TOOL_DESCRIPTIONS=short` | 66 | ≈ 8,100 tokens |
-| `TOOL_CONFIG=drafting` | 177 | ≈ 18,800 tokens |
-| `TOOL_CONFIG=review` | 70 | ≈ 6,100 tokens |
-| `TOOL_CONFIG=spds` (hybrid: 56 pinned, 111 more by search) | 58 | ≈ 6,000 tokens |
+| `TOOL_PROFILE=full` (default) | 243 | ≈ 58,200 tokens |
+| `TOOL_DESCRIPTIONS=short` | 243 | ≈ 28,900 tokens |
+| `TOOL_PROFILE=lean`, `TOOL_DESCRIPTIONS=short` | 66 | ≈ 8,400 tokens |
+| `TOOL_CONFIG=drafting` | 177 | ≈ 19,200 tokens |
+| `TOOL_CONFIG=review` | 70 | ≈ 6,500 tokens |
+| `TOOL_CONFIG=spds` (hybrid: 61 pinned, 106 more by search) | 63 | ≈ 6,600 tokens |
 
 > [!NOTE]
 > These are offline ratio estimates, not tokenizer counts, and they are the *uncached* cost: prompt caching amortises the idle term. `benchmarks/token_suite.py --tokenizer anthropic` counts for real.

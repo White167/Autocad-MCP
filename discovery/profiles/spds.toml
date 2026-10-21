@@ -48,9 +48,10 @@ pinned = [
     "entity_list", "entity_get", "analysis_bounding_box", "drawing_critique",
     # layers, blocks, sheets
     "layer_create", "layer_list", "layer_set_current", "layer_modify", "block_insert",
+    "linetype_list", "analysis_layer_stats",
     "layout_create", "layout_set_current", "viewport_create", "viewport_list",
-    "viewport_set_scale", "viewport_lock",
-    # view, batch, system
-    "view_zoom_window", "view_screenshot", "cad_batch", "system_status",
-    "system_run_lisp", "tool_help",
+    "viewport_set_scale", "viewport_lock", "viewport_delete",
+    # view, batch, system (the autocad-spds skill calls the escape hatches by name)
+    "view_zoom_window", "view_screenshot", "cad_batch", "entity_batch_create",
+    "system_status", "system_run_lisp", "system_run_command", "tool_help",
 ]
