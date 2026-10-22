@@ -1,6 +1,6 @@
 # Bundled drawing templates
 
-Five templates, built by the server's own tools — never hand-edited — and
+Six templates, built by the server's own tools — never hand-edited — and
 listed by `drawing_template_list`. Start from one with
 `drawing_new(template="iso_a3_mech")`.
 
@@ -11,13 +11,16 @@ listed by `drawing_template_list`. Start from one with
 | `iso_a3_pid` | ISO | A3 landscape, ISO 5457 frame + title block | pid | ISO-25 / ISOCP | ISO_A3, monochrome.ctb, 1:1 |
 | `ansi_b_mech` | ANSI (metric) | ANSI B landscape | mech | ANSI / ROMANS | ANSI_B, monochrome.ctb, 1:1 |
 | `ansi_d_arch` | ANSI (metric) | ANSI D landscape | iso13567 | ANSI / ROMANS | ANSI_D, monochrome.ctb, fit |
+| `gost_a3_spds` | ГОСТ Р 21.101 | A3 landscape on tab `Лист1`, СПДС frame 20/5/5/5 + форма 3 (stamp empty) + margin graphs | СПДС set (`spds_setup`) | СПДС_1-100 (also 1-50, 1-200) / GOST | ISO_full_bleed_A3, 1:1 |
 
 ## The two files per template
 
 - `<name>.dxf` — the headless twin. Produced by
   `uv run --frozen python scripts/build_templates.py`, which runs
   `drawing_new → apply_layer_set → styles → drawing_settings → layout rename →
-  titleblock_apply_iso_a3 (A3 sheets) → page_setup_apply → drawing_save_as`.
+  titleblock_apply_iso_a3 (A3 sheets) → page_setup_apply → drawing_save_as`;
+  `gost_a3_spds` runs `spds_setup` and `spds_sheet(layout="Лист1")` instead,
+  its sheet record under a fixed id so the build reproduces.
   `scripts/build_templates.py --check` rebuilds into a temporary folder and
   fails if any committed DXF differs (the save-time stamps `$TDCREATE`,
   `$TDUPDATE`, `$FINGERPRINTGUID`, `$VERSIONGUID` and the two `EZDXF_META`

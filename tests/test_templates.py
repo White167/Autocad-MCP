@@ -21,7 +21,7 @@ from engineering.standards.templates import (
 pytestmark = pytest.mark.asyncio
 
 ROOT = Path(__file__).resolve().parents[1]
-NAMES = ("iso_a3_mech", "iso_a1_arch", "iso_a3_pid", "ansi_b_mech", "ansi_d_arch")
+NAMES = ("iso_a3_mech", "iso_a1_arch", "iso_a3_pid", "ansi_b_mech", "ansi_d_arch", "gost_a3_spds")
 
 
 def _build_module():
@@ -50,7 +50,7 @@ class _Ctx:
 # ── catalogue ───────────────────────────────────────────────────────────────
 
 
-def test_catalog_has_the_five_spec_rows():
+def test_catalog_has_the_six_spec_rows():
     assert tuple(TEMPLATE_CATALOG) == NAMES
     rows = {spec.name: spec for spec in TEMPLATE_CATALOG.values()}
     assert (rows["iso_a3_mech"].paper, rows["iso_a3_mech"].layer_set) == ("ISO_A3", "mech")
@@ -65,9 +65,11 @@ def test_catalog_has_the_five_spec_rows():
         True,
         False,
         False,
+        True,
     ]
     assert all(spec.orientation == "landscape" for spec in TEMPLATE_CATALOG.values())
-    assert {spec.textstyle for spec in TEMPLATE_CATALOG.values()} == {"ISOCP", "ROMANS"}
+    assert {spec.textstyle for spec in TEMPLATE_CATALOG.values()} == {"ISOCP", "ROMANS", "GOST"}
+    assert (rows["gost_a3_spds"].layout, rows["gost_a3_spds"].dimstyle) == ("Лист1", "СПДС_1-100")
 
 
 def test_template_rows_report_files():
@@ -92,7 +94,8 @@ def test_resolve_template_bundled_path_and_unknown(tmp_path):
     assert resolve_template(str(explicit), "ezdxf") == (str(explicit), "path")
     assert resolve_template("sheet.dxf", "com") == ("sheet.dxf", "path")
     with pytest.raises(
-        ValueError, match="iso_a3_mech, iso_a1_arch, iso_a3_pid, ansi_b_mech, ansi_d_arch"
+        ValueError,
+        match="iso_a3_mech, iso_a1_arch, iso_a3_pid, ansi_b_mech, ansi_d_arch, gost_a3_spds",
     ):
         resolve_template("iso_a2_mech", "ezdxf")
     with pytest.raises(ValueError, match="template"):
@@ -231,7 +234,7 @@ async def test_drawing_new_from_an_explicit_dxf_path_reports_source_path(backend
 
 async def test_drawing_template_list_tool(backend):
     result = await server.drawing_template_list(ctx=_Ctx(backend))
-    assert result["ok"] and result["count"] == 5
+    assert result["ok"] and result["count"] == 6
     assert [row["name"] for row in result["templates"]] == list(NAMES)
     assert result["engine"] == "ezdxf"
 

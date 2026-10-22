@@ -48,6 +48,7 @@ __all__ = [
     "FORM3",
     "FORMATS",
     "FRAME_MARGINS",
+    "GOST_LINEWEIGHTS",
     "LAYERS",
     "LINETYPES",
     "TEXT_FONT",
@@ -222,6 +223,12 @@ LAYERS: dict[str, tuple[int, str, float]] = {
     "Текст": (7, "Continuous", 0.18),
     "Штриховка": (8, "Continuous", 0.18),
 }
+
+#: The AutoCAD lineweights inside ГОСТ 2.303's range: the thin line from S/3 of
+#: the thinnest S (0.5 -> 0.17, AutoCAD's 0.18) to the thickest S (1.4). The
+#: standard gives ranges, not a series; this is the AutoCAD set clipped to them
+#: (the ``spds_lineweight`` focus judges an entity's own weight against it).
+GOST_LINEWEIGHTS: tuple[float, ...] = (0.18, 0.25, 0.35, 0.50, 0.70, 1.00, 1.40)
 
 TEXT_STYLE = "GOST"
 TEXT_FONT = "isocpeur.ttf"

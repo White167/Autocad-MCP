@@ -7,7 +7,10 @@
 Each template is: drawing_new -> apply_layer_set -> styles -> drawing_settings
 -> layout renamed to the sheet -> ISO 5457 frame (A3 sheets) -> page_setup_apply
 -> drawing_save_as DXF. Nothing is hand-authored, so what the tools produce is
-what ships.
+what ships. The ГОСТ template (``gost_a3_spds``) goes through the СПДС pack
+instead: ``spds_setup`` (1:50 / 1:100 / 1:200, 1:100 current) and
+``spds_sheet`` on its layout, which also sets the borderless A3 page setup.
+Its sheet record carries a fixed id, so the build stays reproducible.
 
 Styles: once group S's ``dimstyle_create`` / ``textstyle_create`` are on the
 backend they are used (ISO-25 / ISOCP, ANSI / ROMANS, set current). Until then
@@ -47,6 +50,8 @@ from engineering import TitleBlockMetadata, apply_iso_a3_titleblock  # noqa: E40
 from engineering.layers import apply_layer_set  # noqa: E402
 from engineering.standards.papers import resolve_page_setup  # noqa: E402
 from engineering.standards.templates import (  # noqa: E402
+    GOST_TEMPLATE_SCALES,
+    GOST_TEMPLATE_SHEET_ID,
     TEMPLATE_CATALOG,
     TEMPLATES_DIR,
     TemplateSpec,
@@ -160,6 +165,57 @@ def _pin_class_order(doc) -> list[str]:
     return [cls.dxf.name for cls in section.classes.values()]
 
 
+class _Ctx:
+    """The minimum of a tool context ``server.spds_sheet`` reads."""
+
+    def __init__(self, backend):
+        self.lifespan_context = {"backend": backend}
+
+    async def info(self, message):
+        pass
+
+
+async def _build_gost(backend, spec: TemplateSpec) -> dict:
+    """``gost_a3_spds``: the СПДС set-up and the sheet, by the pack's own code."""
+    import server
+    from engineering.spds import records
+    from engineering.spds.setup import spds_setup
+
+    setup = await spds_setup(backend, GOST_TEMPLATE_SCALES, current_scale=100)
+    await backend.textstyle_set_current("GOST")
+    renamed = await backend.layout_rename("Layout1", spec.layout)
+    if not renamed.get("ok"):
+        raise RuntimeError(f"{spec.name}: layout rename failed: {renamed}")
+    fresh_id = records.new_id
+    records.new_id = lambda: GOST_TEMPLATE_SHEET_ID
+    try:
+        sheet = await server.spds_sheet(
+            format="A3",
+            orientation="landscape",
+            stamp=None,
+            signatures=None,
+            extra_columns=True,
+            layout=spec.layout,
+            origin=None,
+            scale=1.0,
+            page_setup=True,
+            ctx=_Ctx(backend),
+        )
+    finally:
+        records.new_id = fresh_id
+    await backend.layout_set_current("Model")
+    return {
+        "layers": setup["layers"],
+        "styles": {"mode": "spds", "dimstyle": spec.dimstyle, "textstyle": spec.textstyle},
+        "settings_applied": setup["variables"],
+        "title_block": True,
+        "page_setup": {
+            "ok": bool((sheet.get("page_setup") or {}).get("ok")),
+            "paper": (sheet.get("page_setup") or {}).get("media"),
+        },
+    }
+
+
 async def build_template(spec: TemplateSpec, out_dir: Path) -> dict:
     """Build one template into ``out_dir/<name>.dxf`` and report what went in."""
     out_dir = Path(out_dir)
@@ -168,6 +224,18 @@ async def build_template(spec: TemplateSpec, out_dir: Path) -> dict:
     await backend.connect()
     try:
         await backend.drawing_new()
+        if spec.standard == "GOST":
+            built = await _build_gost(backend, spec)
+            classes = _pin_class_order(backend._doc)
+            path = out_dir / f"{spec.name}.dxf"
+            await backend.drawing_save_as(str(path), "dxf")
+            return {
+                "name": spec.name,
+                "path": str(path),
+                **built,
+                "settings_pending": [],
+                "classes": classes,
+            }
         layers = await apply_layer_set(backend, spec.layer_set)
         styles = await _apply_styles(backend, spec)
         settings = await backend.drawing_settings(dict(spec.settings))

@@ -1490,7 +1490,7 @@ async def drawing_new(
     template: Annotated[
         str | None,
         "Bundled template name (drawing_template_list: iso_a3_mech, iso_a1_arch, iso_a3_pid, "
-        "ansi_b_mech, ansi_d_arch) or a path to a .dwt/.dxf template file.",
+        "ansi_b_mech, ansi_d_arch, gost_a3_spds) or a path to a .dwt/.dxf template file.",
     ] = None,
     bootstrap: Annotated[
         bool,
@@ -1517,7 +1517,7 @@ async def drawing_new(
     drawing then really carries the template's layers, tabs and page setup.
 
     Refused before anything is replaced: a bare name that is not in the
-    catalogue (the message lists the five), a template path that does not
+    catalogue (the message lists the six), a template path that does not
     exist, and a path outside the allowed directories. With `bootstrap=True`
     (default) the standard engineering linetypes and layers are ensured
     afterwards — idempotent on a template that already has them.
@@ -6387,7 +6387,10 @@ async def drawing_finalize(
     architectural focuses arch_room_unlabelled, arch_wall_gap, arch_opening_clash —
     silent on a sheet with no ACADMCP_ARCH record, plus the topology focuses
     topo_dangling_endpoint, topo_near_miss, topo_interior_crossing — on network
-    layers no P&ID or architectural focus reads, silent on every sheet this server draws),
+    layers no P&ID or architectural focus reads, silent on every sheet this server draws,
+    plus the СПДС focuses spds_text_height, spds_lineweight, spds_axis_letter,
+    spds_elevation_format, spds_stamp_incomplete, spds_outside_frame — silent on a
+    sheet with no ACADMCP_SPDS record),
     then saves to disk, exports a screenshot, and returns the DWG path.
 
     Raises ToolError if any validator 'error' finding is present, or if critique reports an
@@ -6652,8 +6655,10 @@ async def drawing_critique(
             "the architectural focuses arch_room_unlabelled, arch_wall_gap, "
             "arch_opening_clash (silent on a drawing with no ACADMCP_ARCH record), and "
             "the topology focuses topo_dangling_endpoint, topo_near_miss, "
-            "topo_interior_crossing (network layers no P&ID or architectural focus reads). "
-            "None = run all.",
+            "topo_interior_crossing (network layers no P&ID or architectural focus reads), and "
+            "the СПДС focuses spds_text_height, spds_lineweight, spds_axis_letter, "
+            "spds_elevation_format, spds_stamp_incomplete, spds_outside_frame (silent on a "
+            "drawing with no ACADMCP_SPDS record). None = run all.",
         ),
     ] = None,
     ctx: Context = None,
@@ -8035,7 +8040,7 @@ async def mleaderstyle_create(
 
 
 @cad_tool(
-    summary="Put the drawing on ISO or ANSI in one call: dimstyle, text style, units, mech layers.",
+    summary="Put the drawing on ISO, ANSI or ГОСТ (СПДС) in one call: dimstyle, text, units, layers.",
     cost="mutate",
 )
 @mcp.tool(
@@ -8044,12 +8049,17 @@ async def mleaderstyle_create(
 )
 async def drawing_apply_standard(
     standard: Annotated[
-        str, "iso (ISO-25 / ISOCP, decimal comma) | ansi (ANSI / ROMANS, decimal point)"
+        str,
+        "iso (ISO-25 / ISOCP, decimal comma) | ansi (ANSI / ROMANS, decimal point) | "
+        "gost (СПДС: spds_setup for 1:scale)",
     ],
     layers: Annotated[bool, "Also bootstrap the mech layer set with ISO 128 lineweights"] = True,
     units: Annotated[
         bool, "Also write INSUNITS mm, LUNITS/AUNITS decimal, LTSCALE 1, DIMSCALE 1"
     ] = True,
+    scale: Annotated[
+        int | None, "gost only: drawing scale denominator for СПДС_1-M (default 100)"
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """One call for the common case: the standard's dimension style (created
@@ -8064,11 +8074,19 @@ async def drawing_apply_standard(
     variable it cannot read back, before any write; the underlying style
     refusals (`dimstyle_create`, `textstyle_create`) apply unchanged. In the
     `lean` profile (Task 13).
+
+    `gost` runs `spds_setup` for 1:`scale` (ГОСТ linetypes, the СПДС layer
+    set, GOST text style, `СПДС_1-<scale>` dimension style) and makes the
+    style and the GOST text style current; it always writes its layers and
+    units. `scale` is refused for iso / ansi.
     """
     from engineering.standards.apply import apply_standard
 
     await ctx.info(f"Applying the {standard} drafting standard")
-    return await apply_standard(_backend(ctx), standard, layers, units)
+    try:
+        return await apply_standard(_backend(ctx), standard, layers, units, scale)
+    except ValueError as exc:
+        raise ToolError(f"drawing_apply_standard: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -8243,7 +8261,7 @@ async def batch_plot(
 
 
 @cad_tool(
-    summary="List the five bundled drawing templates: standard, sheet, layers, styles, page setup.",
+    summary="List the six bundled drawing templates: standard, sheet, layers, styles, page setup.",
     cost="read",
 )
 @mcp.tool(
@@ -8253,10 +8271,11 @@ async def batch_plot(
 async def drawing_template_list(ctx: Context = None) -> dict:
     """The templates `drawing_new(template=<name>)` can start from.
 
-    Each row: `standard` (ISO/ANSI), `sheet`, `paper`, `layout` (the sheet tab's
-    name), `layer_set` (mech / pid / iso13567), `dimstyle` / `textstyle`
-    (ISO-25 / ISOCP or ANSI / ROMANS), `scale`, `title_block` (the ISO 5457 A3
-    frame, A3 sheets only), the `settings` applied, and `files.dxf` /
+    Each row: `standard` (ISO/ANSI/GOST), `sheet`, `paper`, `layout` (the sheet
+    tab's name), `layer_set` (mech / pid / iso13567 / spds), `dimstyle` /
+    `textstyle` (ISO-25 / ISOCP, ANSI / ROMANS or СПДС_1-100 / GOST), `scale`,
+    `title_block` (the ISO 5457 A3 frame on ISO A3 sheets; the СПДС frame and
+    форма 3, stamp empty, on `gost_a3_spds`), the `settings` applied, and `files.dxf` /
     `files.dwt` with `present` flags — the `.dwt` twins exist only once built
     on a live AutoCAD (`scripts/smoke_settings_com.py --build-dwt`). Never
     refuses; it reads a catalogue.

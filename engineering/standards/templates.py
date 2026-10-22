@@ -1,8 +1,9 @@
-"""The five bundled drawing templates: what each contains, where its files live.
+"""The six bundled drawing templates: what each contains, where its files live.
 
 Built by ``scripts/build_templates.py`` through the server's own backend
 (layers, styles, settings, the ISO 5457 A3 frame where the sheet is A3, page
-setup) and saved as DXF; the ``.dwt`` twins are produced on a live AutoCAD by
+setup) and saved as DXF - the ГОСТ one through ``spds_setup`` and
+``spds_sheet`` instead; the ``.dwt`` twins are produced on a live AutoCAD by
 ``scripts/smoke_settings_com.py --build-dwt`` and committed once.
 """
 
@@ -12,6 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 __all__ = [
+    "GOST_TEMPLATE_SCALES",
+    "GOST_TEMPLATE_SHEET_ID",
     "TEMPLATES_DIR",
     "TEMPLATE_CATALOG",
     "TemplateSpec",
@@ -36,15 +39,15 @@ _ANSI_SETTINGS = {**_ISO_SETTINGS, "decimal_separator": "."}
 @dataclass(frozen=True)
 class TemplateSpec:
     name: str
-    standard: str  # "ISO" | "ANSI"
+    standard: str  # "ISO" | "ANSI" | "GOST"
     sheet: str  # human label, e.g. "A3 landscape"
     paper: str  # engineering.standards.papers.PAPER_SIZES key
     orientation: str
     layout: str  # the paper-space tab's name
-    layer_set: str  # engineering.layers.LAYER_SET_REGISTRY key
-    dimstyle_preset: str  # group S preset id: "iso-25" | "ansi"
-    dimstyle: str  # style name in the drawing
-    textstyle: str  # "ISOCP" | "ROMANS"
+    layer_set: str  # engineering.layers.LAYER_SET_REGISTRY key, or "spds"
+    dimstyle_preset: str  # group S preset id: "iso-25" | "ansi" | "spds"
+    dimstyle: str  # style name in the drawing (the current one)
+    textstyle: str  # "ISOCP" | "ROMANS" | "GOST"
     scale: str  # page setup scale label
     title_block: bool
     settings: dict = field(default_factory=dict)  # drawing_settings facade keys
@@ -134,8 +137,29 @@ TEMPLATE_CATALOG: dict[str, TemplateSpec] = {
             settings=dict(_ANSI_SETTINGS),
             description="ANSI D architectural sheet (metric)",
         ),
+        TemplateSpec(
+            name="gost_a3_spds",
+            standard="GOST",
+            sheet="A3 landscape, СПДС frame + форма 3",
+            paper="ISO_A3",
+            orientation="landscape",
+            layout="Лист1",
+            layer_set="spds",
+            dimstyle_preset="spds",
+            dimstyle="СПДС_1-100",
+            textstyle="GOST",
+            scale="1:1",
+            title_block=True,
+            description="ГОСТ Р 21.101 A3 sheet: СПДС layers, GOST text, СПДС_1-50/100/200",
+        ),
     )
 }
+
+#: The drawing scales ``gost_a3_spds`` carries a ``СПДС_1-M`` dimension style for.
+GOST_TEMPLATE_SCALES: tuple[int, ...] = (50, 100, 200)
+#: The fixed ACADMCP_SPDS sheet id of the template's sheet: a random one would
+#: make every build differ.
+GOST_TEMPLATE_SHEET_ID = "tmpl0a3spds1"
 
 
 def _file(name: str, suffix: str) -> dict:

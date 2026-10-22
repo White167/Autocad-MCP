@@ -39,6 +39,12 @@ CritiqueFocus = Literal[
     "topo_dangling_endpoint",
     "topo_near_miss",
     "topo_interior_crossing",
+    "spds_text_height",
+    "spds_lineweight",
+    "spds_axis_letter",
+    "spds_elevation_format",
+    "spds_stamp_incomplete",
+    "spds_outside_frame",
 ]
 SnapType = Literal["end", "mid", "center", "quad", "int", "perp", "near"]
 
@@ -68,6 +74,12 @@ ALL_CRITIQUE_FOCUSES: tuple[CritiqueFocus, ...] = (
     "topo_dangling_endpoint",
     "topo_near_miss",
     "topo_interior_crossing",
+    "spds_text_height",
+    "spds_lineweight",
+    "spds_axis_letter",
+    "spds_elevation_format",
+    "spds_stamp_incomplete",
+    "spds_outside_frame",
 )
 
 

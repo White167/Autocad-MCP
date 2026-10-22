@@ -847,7 +847,7 @@
       "name": "drawing_apply_standard",
       "group": "styles",
       "cost": "mutate",
-      "summary": "Put the drawing on ISO or ANSI in one call: dimstyle, text style, units, mech layers.",
+      "summary": "Put the drawing on ISO, ANSI or ГОСТ (СПДС) in one call: dimstyle, text, units, layers.",
       "tags": [
         "drawing",
         "style"
@@ -1227,7 +1227,7 @@
       "name": "drawing_template_list",
       "group": "page_setup",
       "cost": "read",
-      "summary": "List the five bundled drawing templates: standard, sheet, layers, styles, page setup.",
+      "summary": "List the six bundled drawing templates: standard, sheet, layers, styles, page setup.",
       "tags": [
         "drawing",
         "pagesetup",

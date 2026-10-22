@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Six `spds_*` critique focuses** (`engineering/spds/critique.py`):
+  `spds_text_height`, `spds_lineweight`, `spds_axis_letter`,
+  `spds_elevation_format`, `spds_stamp_incomplete`, `spds_outside_frame`.
+  They read the `ACADMCP_SPDS` records from one snapshot
+  (`read_document(backend, read_critique_index)`), shared by all six, and run
+  under `focus=None` and inside `drawing_finalize`. A drawing with none of the
+  СПДС layers is not snapshotted at all; one without a record gets no issue.
+  The ГОСТ 2.303 lineweight range is `standards.GOST_LINEWEIGHTS`.
+- **`drawing_apply_standard("gost", scale=M)`** runs `spds_setup` for 1:M and
+  makes `СПДС_1-M` and the GOST text style current. `scale` is refused for
+  `iso` / `ansi`.
+- **Template `gost_a3_spds`**: the СПДС set-up (1:50 / 1:100 / 1:200, 1:100
+  current) and tab `Лист1` with the A3 frame, an empty form 3, the margin
+  graphs and the borderless A3 page setup. Built by
+  `scripts/build_templates.py` (its sheet record has a fixed id, so
+  `--check` holds); the `.dwt` twin was built on AutoCAD 2026 with the new
+  `scripts/smoke_settings_com.py --build-dwt --only gost_a3_spds`, which
+  leaves the other `.dwt` files untouched.
+- **`scripts/smoke_spds_com.py`**, the stage-4 acceptance run: an A3 sheet
+  with form 3, a 4 x 3 axis grid, three levels and a leader in six calls,
+  without `system_run_lisp`, then `drawing_critique(focus=None)` empty, and a
+  hand-edited level caught by `spds_elevation_format`. Passes on AutoCAD 2026
+  (25.1) and headless.
+
 - **`spds_sheet_update(stamp, layout=, sheet_id=)`**: changes graphs of a
   stamp drawn by `spds_sheet` in place. It replaces only those graphs' texts,
   re-fitted by the same rule, and clears a graph given `""`. The sheet is not
@@ -25,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A headless drawing with an `СПДС_1-M` dimension style would not open in
+  AutoCAD** ("handle 34 already in use ... BLOCK_RECORD", eHandleInUse).
+  ezdxf creates a missing built-in arrowhead block (`_ARCHTICK`) while it
+  writes the DIMSTYLE table, after the HEADER, so `$HANDSEED` stayed below
+  the block's handles. The backend now creates the block when the style is
+  written. Found by the `gost_a3_spds` `.dwt` build.
 - `drawing_digest` on a sheet flagged the sheet's own viewport (DXF id 1) as
   `outside_frame` / `layer_0`. The snapshot reader now skips it.
 - `cad_batch` cut any step result that carries a `handle` down to
@@ -35,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every test (`test_cad_tool_meta_reaches_the_wire` failed with a KeyError in
   about one run in four under `-n 8`).
 - `scripts/smoke_v17_com.py` passes every step on AutoCAD 2026 (25.1) too.
+
+### Live runs (AutoCAD 2026, 25.1, 2026-10-22)
+
+`smoke_spds_com.py`, `smoke_settings_com.py --build-dwt --only gost_a3_spds`,
+`smoke_screenshot_com.py`, `smoke_understand_com.py`, `smoke_mech_com.py`,
+`smoke_arch_com.py` and `smoke_pid_com.py` pass with no failure; the mech,
+arch and P&ID sheets end with `drawing_critique` at zero issues. The
+operator's open drawing was only listed and is active again afterwards.
 
 ## [1.7.0] — 2026-10-21
 

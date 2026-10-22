@@ -29,11 +29,11 @@
 |---|---|
 | 0. Стенд замеров | ✅ уже был: `benchmarks/token_suite.py`, расширен строками коротких описаний и пресетов |
 | 1. Профили, короткие описания, hybrid, русский поиск | ✅ сделано (см. CHANGELOG, Unreleased) |
-| 3. Дешёвые скриншоты | ✅ сделано на ezdxf; COM-путь (`view_render` из снимка `Document.Export`) ждёт прогона `scripts/smoke_screenshot_com.py` на AutoCAD 2026 |
+| 3. Дешёвые скриншоты | ✅ сделано на обоих движках: COM-путь (`view_render` из снимка `Document.Export`) прогнан `scripts/smoke_screenshot_com.py` на AutoCAD 2026 (25.1) 22.10.2026, вид оператора не сдвигается |
 | 2. digest, checkpoint/diff, компактные ответы | ✅ сделано: `drawing_digest`, `drawing_checkpoint`, `drawing_diff_since`, `TOOL_RESPONSES=compact` (в `spds` включён). Столбцовый формат `entity_list` не делал: у него уже есть `fields` и `compact` |
-| 5. Баги COM из скилла | ✅ в коде: 5.1 (`run_lisp` возвращает значение), 5.3–5.7, 5.9, 5.10. 5.2 (`GetVariable`) уже был исправлен в 1.6.0. 5.8 (автоповтор) частично: повтор отклонённого вызова уже есть. Живой прогон на AutoCAD 2026 — вместе с общей проверкой |
-| 4. Пак `spds` | ✅ сделано: `spds_setup`, `spds_sheet` (форма 3, А4/А3), `spds_axis`, `spds_axis_grid`, `spds_elevation`, `spds_leader` + контракт `linetype_define`. В 1.7.0 добавлены также `spds_section_mark`, `spds_slope`, `spds_soil_hatch`. Не сделано: форма 2а (последующие листы), фокусы критики `spds_*`, `spds_sheet_update` |
-| 6. Скилл и инструкции | ✅ черновик нового скилла: `docs/skills/autocad-spds/SKILL.md` (≈ 10 КБ вместо 47 КБ), ставится вручную вместо прежнего. Короткие инструкции сервера сделаны на этапе 1 |
+| 5. Баги COM из скилла | ✅ в коде: 5.1 (`run_lisp` возвращает значение), 5.3–5.7, 5.9, 5.10. 5.2 (`GetVariable`) уже был исправлен в 1.6.0. 5.8 (автоповтор) частично: повтор отклонённого вызова уже есть. Живой прогон `scripts/smoke_v17_com.py` проходит на AutoCAD 2024 и 2026 |
+| 4. Пак `spds` | ✅ сделано: `spds_setup`, `spds_sheet` (форма 3, А4/А3), `spds_sheet_update`, `spds_axis`, `spds_axis_grid`, `spds_elevation`, `spds_leader`, `spds_section_mark`, `spds_slope`, `spds_soil_hatch` + контракт `linetype_define`; записи `ACADMCP_SPDS`; шесть фокусов критики `spds_*`; `drawing_apply_standard("gost")`; шаблон `gost_a3_spds` (DXF и `.dwt`). Критерий приёмки проверен `scripts/smoke_spds_com.py` на AutoCAD 2026 (6 вызовов, критика чистая). Не сделано: форма 6 для последующих листов (в ГОСТ Р 21.101-2020 нет формы 2а; размеры формы 6 ждут подтверждения по экземпляру ГОСТ) |
+| 6. Скилл и инструкции | ✅ скилл `docs/skills/autocad-spds/SKILL.md` (шаблон, `drawing_apply_standard("gost")`, фокусы `spds_*`), архив `docs/skills/autocad-spds.zip`, копия в `.claude/skills/autocad-spds/`. Короткие инструкции сервера сделаны на этапе 1 |
 
 ## Живая проверка (AutoCAD 2026)
 

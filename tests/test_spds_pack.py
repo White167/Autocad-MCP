@@ -405,3 +405,39 @@ async def test_a_sheet_on_a_layout_prints_as_that_sheet(client):
         )
     ).structured_content
     assert moved["page_setup"]["ok"] is False and "origin" in moved["page_setup"]["skipped"]
+
+
+async def test_apply_standard_gost_is_spds_setup(client):
+    out = (
+        await client.call_tool("drawing_apply_standard", {"standard": "gost", "scale": 50})
+    ).structured_content
+    assert out["standard"] == "gost" and out["scale"] == 50
+    assert out["dimstyle"] == {"name": "СПДС_1-50", "created": True, "current": True}
+    assert out["textstyle"]["name"] == "GOST" and "Контур" in out["layers"]["created"]
+    again = (
+        await client.call_tool("drawing_apply_standard", {"standard": "GOST", "scale": 50})
+    ).structured_content
+    assert again["dimstyle"]["created"] is False and again["layers"]["created"] == []
+    refused = await client.call_tool(
+        "drawing_apply_standard", {"standard": "iso", "scale": 50}, raise_on_error=False
+    )
+    assert refused.is_error and "gost" in refused.content[0].text
+
+
+async def test_a_saved_spds_drawing_has_no_handle_above_its_handseed(client, tmp_path):
+    """ezdxf made the _ARCHTICK block while writing, after $HANDSEED: AutoCAD 2026
+    refused the file (eHandleInUse). The block is made with the style now."""
+    await client.call_tool("spds_setup", {"scales": [100]})
+    path = tmp_path / "spds.dxf"
+    await client.call_tool("drawing_save_as", {"path": str(path), "format": "dxf"})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    at = lines.index("$HANDSEED") + 2
+    seed = int(lines[at], 16)
+    handles = [
+        int(lines[i + 1], 16)
+        for i in range(len(lines) - 1)
+        if lines[i] in ("  5", "105") and i + 1 != at
+    ]
+    # ezdxf writes the last handle it gave out; AutoCAD reads files where it
+    # equals the largest handle (every bundled template) and refuses below it.
+    assert seed >= max(handles)

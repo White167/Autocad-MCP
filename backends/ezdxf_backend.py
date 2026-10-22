@@ -900,7 +900,15 @@ def _write_dimstyle_values(style, values: dict[str, Any]) -> None:
     takes verbatim); ezdxf's writer wants ``OBLIQUE`` and raises at
     ``doc.write`` on the underscore form, so they go through
     ``ezdxf_arrowhead``. The caller has run ``_require_arrowhead_blocks``.
+
+    A built-in arrowhead's block is created here, not left to the writer.
+    ezdxf makes a missing one (``_ARCHTICK``) while it exports the DIMSTYLE
+    table - after the HEADER, whose ``$HANDSEED`` is then below the handles
+    that block took. AutoCAD 2026 refuses such a file ("handle 34 already in
+    use ... BLOCK_RECORD", eHandleInUse; measured on an ``spds_setup`` DXF).
     """
+    from ezdxf.render.arrows import ARROWS
+
     from engineering.standards.dimstyles import ezdxf_arrowhead
 
     for var, value in values.items():
@@ -912,6 +920,9 @@ def _write_dimstyle_values(style, values: dict[str, Any]) -> None:
             value = ord(value)
         elif var in _ARROWHEAD_VARS:
             value = ezdxf_arrowhead(value)
+            doc = style.doc
+            if value and doc is not None and ARROWS.is_acad_arrow(value):
+                ARROWS.create_block(doc.blocks, value)
         style.dxf.set(attr, value)
 
 

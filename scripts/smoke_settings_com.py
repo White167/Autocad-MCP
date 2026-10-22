@@ -22,6 +22,8 @@ methods the tools call:
     --interactive: user_pick_point (needs the operator at the keyboard)
     --build-dwt:   open each templates/<name>.dxf and save the .dwt twin
                    through drawing_template_save, before anything else
+    --only NAME:   with --build-dwt, build only these twins (repeatable), so
+                   the committed .dwt files of the others stay byte-identical
 
 Prints one JSON report. Exit codes:
 
@@ -51,9 +53,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-#: The five bundled templates (spec §6). Pinned here rather than read from
-#: the catalogue so the smoke also notices a catalogue that lost a row.
-TEMPLATE_NAMES = ("iso_a3_mech", "iso_a1_arch", "iso_a3_pid", "ansi_b_mech", "ansi_d_arch")
+#: The six bundled templates (spec §6, and gost_a3_spds since 1.8). Pinned
+#: here rather than read from the catalogue so the smoke also notices a
+#: catalogue that lost a row.
+TEMPLATE_NAMES = (
+    "iso_a3_mech",
+    "iso_a1_arch",
+    "iso_a3_pid",
+    "ansi_b_mech",
+    "ansi_d_arch",
+    "gost_a3_spds",
+)
 
 #: Every DWG/DWT since R13 opens with "AC10xx" (AC1032 for the 2018 format).
 DWG_MAGIC = b"AC10"
@@ -99,7 +109,7 @@ async def _close_leftovers(backend) -> None:
         _OPENED.remove(name)
 
 
-async def build_dwt(backend) -> list[dict]:
+async def build_dwt(backend, only: list[str] | None = None) -> list[dict]:
     """Open each bundled DXF over COM and save its .dwt twin next to it."""
     from engineering.standards.templates import TEMPLATE_CATALOG, TEMPLATES_DIR
 
@@ -109,7 +119,12 @@ async def build_dwt(backend) -> list[dict]:
             f"TEMPLATE_CATALOG has {len(TEMPLATE_CATALOG)} rows, the smoke pins "
             f"{len(TEMPLATE_NAMES)}: update TEMPLATE_NAMES deliberately"
         )
+    unknown = sorted(set(only or ()) - set(TEMPLATE_NAMES))
+    if unknown:
+        raise SystemExit(f"--only names no bundled template: {unknown}")
     for name in TEMPLATE_NAMES:
+        if only and name not in only:
+            continue
         dxf = Path(TEMPLATES_DIR).resolve() / f"{name}.dxf"
         dwt = Path(TEMPLATES_DIR).resolve() / f"{name}.dwt"
         if not dxf.exists():
@@ -162,7 +177,7 @@ async def main(args: argparse.Namespace) -> int:
         _check(failures, "system_launch attached", report["system_launch"]["attached"] is True)
 
         if args.build_dwt:
-            report["dwt_built"] = await build_dwt(backend)
+            report["dwt_built"] = await build_dwt(backend, args.only)
             _check(
                 failures,
                 "every .dwt is a DWG container",
@@ -382,6 +397,7 @@ async def main(args: argparse.Namespace) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--build-dwt", action="store_true", help="build templates/*.dwt first")
+    parser.add_argument("--only", action="append", help="with --build-dwt: only this template")
     parser.add_argument("--interactive", action="store_true", help="also run user_pick_point")
     parser.add_argument("--keep", action="store_true", help="leave the smoke document open")
     return parser

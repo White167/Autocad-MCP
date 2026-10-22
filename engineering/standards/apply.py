@@ -7,6 +7,11 @@ are the five system variables both standards share; the decimal separator is
 the preset's and arrives through the dimension style. ANSI layer naming is
 company-specific, so both standards use the ``mech`` layer set — only styles
 and the separator differ (spec §4.2).
+
+``gost`` is the СПДС route: it runs ``spds_setup`` (ГОСТ linetypes, the СПДС
+layer set, the GOST text style, ``СПДС_1-M`` for the drawing scale ``M``, the
+units) and makes that dimension style and the GOST text style current - one
+definition of what an СПДС drawing needs, not a second copy here.
 """
 
 from __future__ import annotations
@@ -19,7 +24,13 @@ from engineering.standards.textstyles import TEXT_PRESETS
 if TYPE_CHECKING:
     from backends.base import AutoCADBackend
 
-__all__ = ["STANDARDS", "STANDARD_SYSVARS", "apply_standard", "resolve_standard"]
+__all__ = [
+    "GOST",
+    "STANDARDS",
+    "STANDARD_SYSVARS",
+    "apply_standard",
+    "resolve_standard",
+]
 
 STANDARDS: dict[str, dict[str, str]] = {
     "iso": {"preset": "iso-25", "dimstyle": "ISO-25", "textstyle": "ISOCP", "layer_set": "mech"},
@@ -37,12 +48,45 @@ STANDARD_SYSVARS: tuple[tuple[str, Any], ...] = (
 )
 
 
+#: The СПДС standard, applied through ``engineering/spds/setup.py``.
+GOST = "gost"
+
+
 def resolve_standard(standard: str) -> tuple[str, dict[str, str]]:
     """``(key, row)`` for ``iso`` / ``ansi`` (any case), else ``ValueError``."""
     key = str(standard).strip().lower() if standard is not None else ""
     if key not in STANDARDS:
-        raise ValueError(f"standard: unknown value {standard!r}; use one of {sorted(STANDARDS)}")
+        raise ValueError(
+            f"standard: unknown value {standard!r}; use one of {sorted([*STANDARDS, GOST])}"
+        )
     return key, STANDARDS[key]
+
+
+async def _apply_gost(backend: AutoCADBackend, scale: int | None) -> dict:
+    from engineering.spds.setup import spds_setup
+    from engineering.spds.standards import TEXT_STYLE, dimstyle_name
+
+    m = 100 if scale is None else int(scale)
+    setup = await spds_setup(backend, [m], current_scale=m)
+    await backend.textstyle_set_current(TEXT_STYLE)
+    name = dimstyle_name(m)
+    return {
+        "standard": GOST,
+        "scale": m,
+        "dimstyle": {
+            "name": name,
+            "created": setup["dimstyles"][name] == "created",
+            "current": True,
+        },
+        "textstyle": {
+            "name": TEXT_STYLE,
+            "created": setup["text_style"] != "present",
+            "current": True,
+        },
+        "settings": {"variables": setup["variables"], "applied": True},
+        "layers": {"layer_set": "spds", "created": setup["layers_created"]},
+        "linetypes_created": setup["linetypes_created"],
+    }
 
 
 def _same(old: Any, new: Any) -> bool:
@@ -55,7 +99,11 @@ def _same(old: Any, new: Any) -> bool:
 
 
 async def apply_standard(
-    backend: AutoCADBackend, standard: str, layers: bool = True, units: bool = True
+    backend: AutoCADBackend,
+    standard: str,
+    layers: bool = True,
+    units: bool = True,
+    scale: int | None = None,
 ) -> dict:
     """Styles created (or reused) and made current, units written, layers bootstrapped.
 
@@ -76,7 +124,17 @@ async def apply_standard(
     on that value. Deciding on the gate read skipped the DIMSCALE write
     whenever a pre-existing ISO-25/ANSI carried another scale, and reported
     ``changed: {}`` on a drawing left at the style's scale.
+
+    ``gost`` always writes its layers and units (``spds_setup`` is one unit);
+    ``scale`` is its drawing scale denominator (default 100) and is refused
+    for ``iso`` / ``ansi``, whose styles are 1:1.
     """
+    if str(standard).strip().lower() == GOST:
+        if scale is not None and int(scale) <= 0:
+            raise ValueError("scale is a positive denominator, e.g. 100 for 1:100")
+        return await _apply_gost(backend, scale)
+    if scale is not None:
+        raise ValueError("scale applies to the gost standard only")
     key, row = resolve_standard(standard)
     if not isinstance(layers, bool) or not isinstance(units, bool):
         raise TypeError("layers and units must be booleans")

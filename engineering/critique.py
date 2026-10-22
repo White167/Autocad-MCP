@@ -424,6 +424,10 @@ from .understand.critique import TOPO_DISPATCH  # noqa: E402  (same reason: afte
 
 _FOCUS_DISPATCH.update(TOPO_DISPATCH)
 
+from .spds.critique import SPDS_DISPATCH  # noqa: E402  (same reason: after the base focuses)
+
+_FOCUS_DISPATCH.update(SPDS_DISPATCH)
+
 
 async def run_critique(
     backend: AutoCADBackend,
